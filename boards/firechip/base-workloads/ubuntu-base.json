@@ -12,8 +12,8 @@
       "config" : "linux-config",
       "modules" : {
           "icenet" : "../../drivers/icenet-driver",
-          "iceblk" : "../../drivers/iceblk-driver",
-          "accnet" : "../../drivers/accnet-driver"
+          "accnet" : "../../drivers/accnet-driver",
+          "iceblk" : "../../drivers/iceblk-driver"
       }
   },
   "firmware" : {
@@ -22,6 +22,9 @@
   "host-init" : "host-init.sh",
   "files" : [
       [ "trigger/start", "/usr/bin/firesim-start-trigger"],
-      [ "trigger/end", "/usr/bin/firesim-end-trigger"]
+      [ "trigger/end", "/usr/bin/firesim-end-trigger"],
+      [ "test/ifconfig", "/root/ifconfig"],
+      [ "test/arp", "/root/arp"],
+      [ "../../drivers", "/root/drivers/"]
   ]
 }
