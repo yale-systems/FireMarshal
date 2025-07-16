@@ -10,7 +10,7 @@ LINUXSRC=../../linux
 
 KMAKE=make -C $(LINUXSRC) ARCH=riscv CROSS_COMPILE=riscv64-unknown-linux-gnu- M=$(PWD)
 
-accnet.ko: accnet.c
+accnet.ko: accnet.c accnet.h
 	$(KMAKE)
 
 clean:

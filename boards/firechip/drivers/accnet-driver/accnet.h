@@ -22,7 +22,7 @@
 
 /* Can't add new CONFIG parameters in an external module, so define them here */
 #define CONFIG_ACCNET_MTU 1500
-#define CONFIG_ACCNET_RING_SIZE 64
+#define CONFIG_ACCNET_RING_SIZE 1280
 #define CONFIG_ACCNET_TX_THRESHOLD 16
 
 #define ACCNET_NAME "acc-nic"

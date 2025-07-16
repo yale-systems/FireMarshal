@@ -26,6 +26,27 @@ MODULE_DESCRIPTION("accnet driver");
 MODULE_AUTHOR("Amirmohammad Nazari");
 MODULE_LICENSE("Dual MIT/GPL");
 
+
+void print_skb_data(struct sk_buff *skb) {
+    unsigned int len = skb_headlen(skb); // Only prints linear part, not fragments
+
+    printk(KERN_DEBUG "skb->len = %u\n", skb->len);
+    printk(KERN_DEBUG "skb->headlen = %u\n", len);
+    printk(KERN_DEBUG "skb->data:\n");
+
+    // Print linear data
+#ifdef DEBUG
+    int i;
+    unsigned int total = 0;
+	unsigned char *data;
+    data = skb->data;
+    for (i = 0; i < len && total < 128; i++, total++)
+        printk(KERN_CONT "%02x ", data[i]);
+#endif
+}
+
+
+
 static inline void sk_buff_cq_init(struct sk_buff_cq *cq)
 {
 	cq->head = 0;
@@ -35,12 +56,21 @@ static inline void sk_buff_cq_init(struct sk_buff_cq *cq)
 static inline void sk_buff_cq_push(
 		struct sk_buff_cq *cq, struct sk_buff *skb)
 {
+	if ( ((cq->head + 1) & (CONFIG_ACCNET_RING_SIZE - 1)) == cq->tail ) {
+		printk(KERN_ERR "AccNet: sk_buff_cq_push overflow\n");
+		return;
+	}
 	cq->entries[cq->head].skb = skb;
 	cq->head = (cq->head + 1) & (CONFIG_ACCNET_RING_SIZE - 1);
 }
 
 static inline struct sk_buff *sk_buff_cq_pop(struct sk_buff_cq *cq)
 {
+	if (cq->head == cq->tail) {
+		printk(KERN_ERR "AccNet: sk_buff_cq_pop underflow\n");
+		return NULL;
+	}
+
 	struct sk_buff *skb;
 
 	skb = cq->entries[cq->tail].skb;
@@ -116,9 +146,6 @@ static inline void post_send(
 		partial = 0;
 	}
 
-	addr -= NET_IP_ALIGN;
-	len += NET_IP_ALIGN;
-
 	packet = (partial << 63) | (len << 48) | (addr & 0xffffffffffffL);
 	iowrite64(packet, nic->iomem_tx + ACCNET_TX_REQ);
 
@@ -142,6 +169,7 @@ static inline void post_recv(
 	skb_reserve(skb, align);
 	addr = virt_to_phys(skb->data);
 
+	dev_dbg(nic->dev, "Posting receive buffer at phys_addr=%lx with alignment %d\n", addr, align);
 	iowrite64(addr, nic->iomem_rx + ACCNET_RX_DMA_ADDR);
 	sk_buff_cq_push(&nic->recv_cq, skb);
 }
@@ -188,6 +216,8 @@ static int complete_recv(struct net_device *ndev, int budget)
 	struct accnet_device *nic = netdev_priv(ndev);
 	struct sk_buff *skb;
 	int len, n, i;
+	uint64_t res;
+	uintptr_t addr;
 	
 	printk(KERN_DEBUG "AccNet: complete_recv called with budget %d\n", budget);
 	n = recv_comp_avail(nic);
@@ -197,10 +227,17 @@ static int complete_recv(struct net_device *ndev, int budget)
 	printk(KERN_DEBUG "AccNet: Completing %d receive requests\n", n);
 
 	for (i = 0; i < n; i++) {
-		len = ioread64(nic->iomem_rx + ACCNET_RX_COMP_LOG) & 0xffff;
+		res = ioread64(nic->iomem_rx + ACCNET_RX_COMP_LOG);
+		len = res & 0xffff;
+		addr = (res >> 16) & 0xffffffffffffL;
+		dev_dbg(nic->dev, "Received packet at phys_addr=%lx, virt_addr=%p, len=%d\n", addr, phys_to_virt(addr), len);
+
 		skb = sk_buff_cq_pop(&nic->recv_cq);
+		dev_dbg(nic->dev, "skb from recv_cq virt_addr=%p, phys_addr=%lx\n", skb->data, virt_to_phys(skb->data));
+
+
 		skb_put(skb, len);
-		skb_pull(skb, NET_IP_ALIGN);
+		print_skb_data(skb);
 
 #ifdef CONFIG_ACCNET_CHECKSUM
 		csum_res = ioread8(nic->iomem + ACCNET_RXCSUM_RES);
@@ -232,7 +269,7 @@ static void alloc_recv(struct net_device *ndev)
 	dev_dbg(nic->dev, "Allocating %d receive buffers\n", recv_cnt);
 	for ( ; recv_cnt > 0; recv_cnt--) {
 		struct sk_buff *skb;
-		skb = netdev_alloc_skb(ndev, MAX_FRAME_SIZE);
+		skb = netdev_alloc_skb(ndev, DMA_LEN_ALIGN(MAX_FRAME_SIZE));
 		post_recv(nic, skb);
 	}
 }
@@ -459,7 +496,7 @@ static int accnet_stop(struct net_device *ndev)
 	clear_intmask(nic, ACCNET_INTMASK_BOTH);
 	netif_stop_queue(ndev);
 
-	printk(KERN_DEBUG "AccNet: stopped device\n");
+	dev_info(nic->dev, "AccNet device %s closed successfully\n", ndev->name);
 	return 0;
 }
 
@@ -468,7 +505,10 @@ static int accnet_start_xmit(struct sk_buff *skb, struct net_device *ndev)
 	struct accnet_device *nic = netdev_priv(ndev);
 	unsigned long flags;
 
-	// spin_lock_irqsave(&nic->tx_lock, flags);
+	dev_dbg(nic->dev, "Transmitting packet of length %d\n", skb->len);
+	print_skb_data(skb);
+
+	spin_lock_irqsave(&nic->tx_lock, flags);
 
 	if (unlikely(!send_space(nic, skb_shinfo(skb)->nr_frags + 1))) {
 		netif_stop_queue(ndev);
@@ -493,7 +533,7 @@ static int accnet_start_xmit(struct sk_buff *skb, struct net_device *ndev)
 		accnet_schedule(nic);
 	}
 
-	// spin_unlock_irqrestore(&nic->tx_lock, flags);
+	spin_unlock_irqrestore(&nic->tx_lock, flags);
 
 	return NETDEV_TX_OK;
 }
@@ -528,13 +568,6 @@ static int accnet_probe(struct platform_device *pdev)
 	struct net_device *ndev;
 	struct accnet_device *nic;
 	int ret;
-	// struct resource *res;
-
-	// res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	// if (res->start != 0x10018000) {
-	// 	dev_warn(dev, "Unexpected resource start address: 0x%llx\n", res->start);
-	// 	return 0;
-	// }
 
 	if (!dev->of_node)
 		return -ENODEV;
@@ -592,14 +625,6 @@ static int accnet_remove(struct platform_device *pdev)
 {
 	struct net_device *ndev;
 	struct accnet_device *nic;
-	// struct resource *res;
-	// int ret;
-
-	// res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	// if (res->start != 0x10018000) {
-	// 	dev_warn(&pdev->dev, "Unexpected resource start address: 0x%llx\n", res->start);
-	// 	return 0;
-	// }
 
 	ndev = platform_get_drvdata(pdev);
 	nic = netdev_priv(ndev);
