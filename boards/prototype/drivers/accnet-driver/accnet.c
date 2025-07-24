@@ -544,13 +544,9 @@ static void accnet_init_mac_address(struct net_device *ndev)
 	
 	// Hard-Coding MacAddress for now
 	// uint64_t macaddr = ioread64(nic->iomem + ACCNET_MACADDR);
-<<<<<<< HEAD
 	
 	// QSFP0: 00:0a:35:06:4d:e2 
 	uint64_t macaddr = 0xe24d06350a00;  
-=======
-	uint64_t macaddr = 0x112233445566;
->>>>>>> upstream/master
 
 	ndev->addr_assign_type = NET_ADDR_PERM;
 	ndev->addr_len = MACADDR_BYTES;

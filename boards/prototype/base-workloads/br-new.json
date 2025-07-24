@@ -16,13 +16,5 @@
   },
   "firmware" : {
       "opensbi-src" : "../../firmware/opensbi"
-<<<<<<< HEAD
   }
-=======
-  },
-  "host-init" : "host-init.sh",
-  "files" : [
-      [ "../../drivers", "/root/drivers/"]
-  ]
->>>>>>> upstream/master
 }
