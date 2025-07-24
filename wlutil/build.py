@@ -417,7 +417,7 @@ def generateKConfig(kfrags, linuxSrc):
     defCfg = wlutil.getOpt('gen-dir') / 'defconfig'
 
     # Create a defconfig to use as reference
-    wlutil.run(['make'] + wlutil.getOpt('linux-make-args') + ['defconfig'], cwd=linuxSrc)
+    # wlutil.run(['make'] + wlutil.getOpt('linux-make-args') + ['defconfig'], cwd=linuxSrc)
     shutil.copy(linuxCfg, defCfg)
 
     # Create a config from the user fragments
