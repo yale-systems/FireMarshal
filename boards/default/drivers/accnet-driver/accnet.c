@@ -603,7 +603,7 @@ static int accnet_probe(struct platform_device *pdev)
 		return ret;
 
 	accnet_init_mac_address(ndev);
-	strscpy(netdev->name, "accnic0", IFNAMSIZ);
+	strscpy(ndev->name, "accnic%d", IFNAMSIZ);
 
 	if ((ret = register_netdev(ndev)) < 0) {
 		dev_err(dev, "Failed to register netdev\n");
