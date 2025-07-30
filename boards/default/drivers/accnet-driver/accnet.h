@@ -25,7 +25,7 @@
 #define CONFIG_ACCNET_RING_SIZE 1280
 #define CONFIG_ACCNET_TX_THRESHOLD 16
 
-#define ACCNET_NAME "acc-nic"
+#define ACCNET_NAME "accnet"
 
 #define ACCNET_INTMASK_TX 1
 #define ACCNET_INTMASK_RX 2
@@ -61,9 +61,9 @@
 #define ACCNET_TX_INTR_CLEAR (ACCNET_TX_BASE + 0x1C)
 
 #define ETH_HEADER_BYTES 14
-#define ALIGN_BYTES 8
-#define ALIGN_MASK 0x7
-#define ALIGN_SHIFT 3
+#define ALIGN_BYTES 64
+#define ALIGN_MASK 0x3f
+#define ALIGN_SHIFT 6
 #define MAX_FRAME_SIZE (CONFIG_ACCNET_MTU + ETH_HEADER_BYTES + NET_IP_ALIGN)
 #define DMA_PTR_ALIGN(p) ((typeof(p)) (__ALIGN_KERNEL((uintptr_t) (p), ALIGN_BYTES)))
 #define DMA_LEN_ALIGN(n) (((((n) - 1) >> ALIGN_SHIFT) + 1) << ALIGN_SHIFT)
