@@ -28,7 +28,7 @@ static int accnet_misc_release(struct inode *inode, struct file *filp) {
 
 static long accnet_misc_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
-	// struct accnet_dev *nic = file->private_data;
+	struct accnet_device *nic = file->private_data;
 	size_t minsz;
 
 	if (cmd == ACCNET_IOCTL_GET_API_VERSION) {
@@ -84,9 +84,25 @@ static long accnet_misc_ioctl(struct file *file, unsigned int cmd, unsigned long
 			info.type = ACCNET_REGION_TYPE_NIC_CTRL;
 			info.next = 1;
 			info.child = 0;
-			info.size = 0;
+			info.size = nic->hw_regs_control_size;
 			info.offset = ((u64)info.index) << 40;
 			strlcpy(info.name, "ctrl", sizeof(info.name));
+			break;
+        case 1:
+			info.type = ACCNET_REGION_TYPE_NIC_CTRL;
+			info.next = 2;
+			info.child = 0;
+			info.size = nic->hw_regs_udp_tx_size;
+			info.offset = ((u64)info.index) << 40;
+			strlcpy(info.name, "udp-tx", sizeof(info.name));
+			break;
+        case 2:
+			info.type = ACCNET_REGION_TYPE_NIC_CTRL;
+			info.next = 3;
+			info.child = 0;
+			info.size = nic->hw_regs_udp_rx_size;
+			info.offset = ((u64)info.index) << 40;
+			strlcpy(info.name, "udp-rx", sizeof(info.name));
 			break;
 		default:
 			return -EINVAL;
