@@ -19,6 +19,11 @@
 #include <linux/netdevice.h>
 #include <linux/etherdevice.h>
 
+#include <linux/dma-mapping.h>
+#include <linux/miscdevice.h> 
+
+#include <linux/io.h>   /* iowriteXX */
+#define REG(base, off) ((void __iomem *)((u8 __iomem *)(base) + (off)))
 
 /* Can't add new CONFIG parameters in an external module, so define them here */
 #define CONFIG_ACCNET_MTU 1500
@@ -60,6 +65,33 @@
 #define ACCNET_TX_INTR_PEND (ACCNET_TX_BASE + 0x18)
 #define ACCNET_TX_INTR_CLEAR (ACCNET_TX_BASE + 0x1C)
 
+/* UDP */
+#define ACCNET_UDP_RING_SIZE 16 * 1024
+
+// UDP RX Engine registers
+#define ACCNET_UDP_RX_RING_BASE 0x00
+#define ACCNET_UDP_RX_RING_SIZE 0x08
+#define ACCNET_UDP_RX_RING_HEAD 0x0C
+#define ACCNET_UDP_RX_RING_TAIL 0x10
+
+// UDP TX Engine registers
+#define ACCNET_UDP_TX_RING_BASE        0x00
+#define ACCNET_UDP_TX_RING_SIZE        0x08
+#define ACCNET_UDP_TX_RING_HEAD        0x0C
+#define ACCNET_UDP_TX_RING_TAIL        0x10
+#define ACCNET_UDP_TX_MTU              0x14
+#define ACCNET_UDP_TX_HDR_MAC_SRC      0x20
+#define ACCNET_UDP_TX_HDR_MAC_DST      0x28
+#define ACCNET_UDP_TX_HDR_IP_SRC       0x30
+#define ACCNET_UDP_TX_HDR_IP_DST       0x34
+#define ACCNET_UDP_TX_HDR_IP_TOS       0x38
+#define ACCNET_UDP_TX_HDR_IP_TTL       0x39
+#define ACCNET_UDP_TX_HDR_IP_ID        0x3A
+#define ACCNET_UDP_TX_HDR_UDP_SRC_PORT 0x40
+#define ACCNET_UDP_TX_HDR_UDP_DST_PORT 0x42
+#define ACCNET_UDP_TX_HDR_UDP_CSUM     0x44
+
+// Others
 #define ETH_HEADER_BYTES 14
 #define ALIGN_BYTES 64
 #define ALIGN_MASK 0x3f
@@ -82,6 +114,8 @@ struct sk_buff_cq {
 #define SK_BUFF_CQ_COUNT(cq) CIRC_CNT(cq.head, cq.tail, CONFIG_ACCNET_RING_SIZE)
 #define SK_BUFF_CQ_SPACE(cq) CIRC_SPACE(cq.head, cq.tail, CONFIG_ACCNET_RING_SIZE)
 
+#define MAGIC_CHAR 0xCCCCCCCCUL
+
 typedef enum {
 	Control,
 	RxEngine,
@@ -90,7 +124,6 @@ typedef enum {
 
 struct accnet_device {
 	struct device *dev;
-	void __iomem *iomem;
 	void __iomem *iomem_tx;
 	void __iomem *iomem_rx;
 	struct napi_struct napi;
@@ -100,16 +133,6 @@ struct accnet_device {
 	spinlock_t rx_lock;
 	int tx_irq;
 	int rx_irq;
-
-    // DMA buffer TX
-	size_t dma_region_len_tx;
-	void *dma_region_tx;
-	dma_addr_t dma_region_addr_tx;
-
-	// DMA buffer RX
-	size_t dma_region_len_rx;
-	void *dma_region_rx;
-	dma_addr_t dma_region_addr_rx;
 
 	// DMA buffer UDP TX
 	size_t dma_region_len_udp_tx;
@@ -121,7 +144,26 @@ struct accnet_device {
 	void *dma_region_udp_rx;
 	dma_addr_t dma_region_addr_udp_rx;
 
+	resource_size_t hw_regs_control_size;
+	phys_addr_t hw_regs_control_phys;
+	void __iomem *iomem;
+
+	resource_size_t hw_regs_udp_tx_size;
+	phys_addr_t hw_regs_udp_tx_phys;
+	void __iomem *iomem_udp_tx;
+
+	resource_size_t hw_regs_udp_rx_size;
+	phys_addr_t hw_regs_udp_rx_phys;
+	void __iomem *iomem_udp_rx;
+
     struct miscdevice misc_dev; // Add the miscdevice member here
+
+	unsigned long magic;
 };
+
+static int accnet_misc_mmap(struct file *filp, struct vm_area_struct *vma);
+static int accnet_misc_open(struct inode *inode, struct file *filp);
+static int accnet_misc_release(struct inode *inode, struct file *filp);
+static long accnet_misc_ioctl(struct file *file, unsigned int cmd, unsigned long arg);
 
 #endif /* ACCNET_DRIVER_H */

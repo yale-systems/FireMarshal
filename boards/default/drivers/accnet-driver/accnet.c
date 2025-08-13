@@ -20,6 +20,11 @@
 #include <linux/netdevice.h>
 #include <linux/etherdevice.h>
 
+#include <linux/dma-mapping.h>
+#include <linux/miscdevice.h>
+
+#include "accnet_misc.c"
+#include "accnet_ioctl.h"
 #include "accnet.h"
 
 MODULE_DESCRIPTION("accnet driver");
@@ -44,8 +49,6 @@ void print_skb_data(struct sk_buff *skb) {
         printk(KERN_CONT "%02x ", data[i]);
 #endif
 }
-
-
 
 static inline void sk_buff_cq_init(struct sk_buff_cq *cq)
 {
@@ -355,8 +358,8 @@ static int accnet_parse_addr(struct net_device *ndev)
 	struct device *dev = nic->dev;
 	struct device_node *node = dev->of_node;
 	struct resource regs;
-	struct device_node *np_rx, *np_tx;
-	struct resource regs_rx, regs_tx;
+	struct device_node *np_rx, *np_tx, *np_udp_rx, *np_udp_tx;
+	struct resource regs_rx, regs_tx, regs_udp_rx, regs_udp_tx;
 	int err;
 
 	err = of_address_to_resource(node, 0, &regs);
@@ -370,6 +373,9 @@ static int accnet_parse_addr(struct net_device *ndev)
 		dev_err(dev, "could not remap io address %llx", regs.start);
 		return PTR_ERR(nic->iomem);
 	}
+
+	nic->hw_regs_control_phys = regs.start;                 /* <-- save phys */
+	nic->hw_regs_control_size = resource_size(&regs);       /* <-- save size  */
 
 	// Find rx node
     np_rx = of_find_compatible_node(NULL, NULL, "yale-systems,acc-nic-rx-engine");
@@ -406,6 +412,48 @@ static int accnet_parse_addr(struct net_device *ndev)
 		dev_err(dev, "could not remap TX io address %llx", regs_tx.start);
 		return PTR_ERR(nic->iomem_tx);
 	}
+
+	// Find UDP rx node
+    np_udp_rx = of_find_compatible_node(NULL, NULL, "yale-systems,acc-nic-udp-rx-engine");
+	if (!np_udp_rx) {
+		dev_err(dev, "Cannot find UDP RX engine node\n");
+		return -ENODEV;
+	}
+
+	if (of_address_to_resource(np_udp_rx, 0, &regs_udp_rx)) {
+		dev_err(dev, "Failed to get UDP RX resource\n");
+		return -EINVAL;
+	}
+
+	nic->iomem_udp_rx = devm_ioremap_resource(dev, &regs_udp_rx);
+	if (IS_ERR(nic->iomem_udp_rx)) {
+		dev_err(dev, "could not remap UDP RX io address %llx", regs_udp_rx.start);
+		return PTR_ERR(nic->iomem_udp_rx);
+	}
+
+	nic->hw_regs_udp_rx_phys = regs_udp_rx.start;                 /* <-- save phys */
+	nic->hw_regs_udp_rx_size = resource_size(&regs_udp_rx);       /* <-- save size  */
+
+	// Find UDP tx node
+    np_udp_tx = of_find_compatible_node(NULL, NULL, "yale-systems,acc-nic-udp-tx-engine");
+	if (!np_udp_tx) {
+		dev_err(dev, "Cannot find TX engine node\n");
+		return -ENODEV;
+	}
+
+	if (of_address_to_resource(np_udp_tx, 0, &regs_udp_tx)) {
+		dev_err(dev, "Failed to get TX resource\n");
+		return -EINVAL;
+	}
+
+	nic->iomem_udp_tx = devm_ioremap_resource(dev, &regs_udp_tx);
+	if (IS_ERR(nic->iomem_udp_tx)) {
+		dev_err(dev, "could not remap TX io address %llx", regs_udp_tx.start);
+		return PTR_ERR(nic->iomem_udp_tx);
+	}
+
+	nic->hw_regs_udp_tx_phys = regs_udp_tx.start;                 /* <-- save phys */
+	nic->hw_regs_udp_tx_size = resource_size(&regs_udp_tx);       /* <-- save size  */
 
 	return 0;
 }
@@ -558,10 +606,54 @@ static void accnet_init_mac_address(struct net_device *ndev)
 	}
 }
 
+static void init_udp_engine(struct net_device *ndev) {
+	struct accnet_device *nic = netdev_priv(ndev);
+
+	/* RX */
+	u64 rx_base = (u64)nic->dma_region_addr_udp_rx;
+	iowrite64(rx_base, 		  		 REG(nic->iomem_udp_rx, ACCNET_UDP_RX_RING_BASE));
+	iowrite32(ACCNET_UDP_RING_SIZE,  REG(nic->iomem_udp_rx, ACCNET_UDP_RX_RING_SIZE));
+	iowrite32(0,              		 REG(nic->iomem_udp_rx, ACCNET_UDP_RX_RING_HEAD));
+	iowrite32(0,              		 REG(nic->iomem_udp_rx, ACCNET_UDP_RX_RING_TAIL));
+
+	/* TX ring */
+	u64 tx_base = (u64)nic->dma_region_addr_udp_tx;
+	iowrite64(tx_base, 		  		 REG(nic->iomem_udp_tx, ACCNET_UDP_TX_RING_BASE));
+	iowrite32(ACCNET_UDP_RING_SIZE,  REG(nic->iomem_udp_tx, ACCNET_UDP_TX_RING_SIZE));
+	iowrite32(0,              		 REG(nic->iomem_udp_tx, ACCNET_UDP_TX_RING_HEAD));
+	iowrite32(0,              		 REG(nic->iomem_udp_tx, ACCNET_UDP_TX_RING_TAIL));
+	iowrite16(1472,           		 REG(nic->iomem_udp_tx, ACCNET_UDP_TX_MTU));
+
+	/* TX header fields */
+	iowrite64(0x00112233445566ULL, REG(nic->iomem_udp_tx, ACCNET_UDP_TX_HDR_MAC_SRC)); /* 48-bit in 64-bit reg */
+	iowrite64(0x00887766554433ULL, REG(nic->iomem_udp_tx, ACCNET_UDP_TX_HDR_MAC_DST)); /* 48-bit in 64-bit reg */
+
+	iowrite32(0x0a000002, REG(nic->iomem_udp_tx, ACCNET_UDP_TX_HDR_IP_SRC)); /* 10.0.0.2 */
+	iowrite32(0x0a000001, REG(nic->iomem_udp_tx, ACCNET_UDP_TX_HDR_IP_DST)); /* 10.0.0.1 */
+
+	iowrite8(0,     REG(nic->iomem_udp_tx, ACCNET_UDP_TX_HDR_IP_TOS));
+	iowrite8(64,    REG(nic->iomem_udp_tx, ACCNET_UDP_TX_HDR_IP_TTL));
+	iowrite16(0,    REG(nic->iomem_udp_tx, ACCNET_UDP_TX_HDR_IP_ID));
+
+	iowrite16(1111, REG(nic->iomem_udp_tx, ACCNET_UDP_TX_HDR_UDP_SRC_PORT));
+	iowrite16(1234, REG(nic->iomem_udp_tx, ACCNET_UDP_TX_HDR_UDP_DST_PORT));
+	/* If your HW supports writing a UDP checksum value directly:
+	* iowrite16(1500, REG(nic->iomem_udp_tx, ACCNET_UDP_TX_HDR_UDP_CSUM));
+	*/
+}
+
 static const struct net_device_ops accnet_ops = {
 	.ndo_open = accnet_open,
 	.ndo_stop = accnet_stop,
 	.ndo_start_xmit = accnet_start_xmit
+};
+
+static const struct file_operations accnet_fops = {
+    .owner = THIS_MODULE,
+    .mmap = accnet_misc_mmap,
+    .open = accnet_misc_open,
+    .release = accnet_misc_release,
+	.unlocked_ioctl = accnet_misc_ioctl,
 };
 
 static int accnet_probe(struct platform_device *pdev)
@@ -621,7 +713,49 @@ static int accnet_probe(struct platform_device *pdev)
 			ndev->dev_addr[4],
 			ndev->dev_addr[5]);
 
+	// Allocate DMA buffer UDP TX
+	nic->dma_region_len_udp_tx = ACCNET_UDP_RING_SIZE * 2;
+	nic->dma_region_udp_tx = dma_alloc_coherent(dev, nic->dma_region_len_udp_tx, &nic->dma_region_addr_udp_tx, GFP_KERNEL | __GFP_ZERO);
+	if (!nic->dma_region_udp_tx) {
+		ret = -ENOMEM;
+		goto fail_dma_alloc_tx;
+	}
+	dev_info(dev, "Allocated DMA UDP_TX region virt %p, phys %p", nic->dma_region_udp_tx, (void *)nic->dma_region_addr_udp_tx);
+	
+	// Allocate DMA buffer UDP RX
+	nic->dma_region_len_udp_rx = ACCNET_UDP_RING_SIZE * 2;
+	nic->dma_region_udp_rx = dma_alloc_coherent(dev, nic->dma_region_len_udp_rx, &nic->dma_region_addr_udp_rx, GFP_KERNEL | __GFP_ZERO);
+	if (!nic->dma_region_udp_rx) {
+		ret = -ENOMEM;
+		goto fail_dma_alloc;
+	}
+	dev_info(dev, "Allocated DMA UDP_RX region virt %p, phys %p", nic->dma_region_udp_rx, (void *)nic->dma_region_addr_udp_rx);
+
+	// Register the misc device
+	// Initialize the miscdevice structure
+    nic->misc_dev.minor = MISC_DYNAMIC_MINOR;
+    nic->misc_dev.name = "accnet-misc";
+    nic->misc_dev.fops = &accnet_fops;
+
+	ret = misc_register(&nic->misc_dev);
+	if (ret) {
+		dev_err(dev, "Failed to register misc device");
+		goto fail_misc_register;
+	}
+	else {
+		dev_info(dev, "Misc registered :)");
+	}
+
+	init_udp_engine(ndev);
+
 	return 0;
+
+fail_misc_register:
+	dma_free_coherent(dev, nic->dma_region_len_udp_tx, nic->dma_region_udp_tx, nic->dma_region_addr_udp_tx);
+fail_dma_alloc:
+	dma_free_coherent(dev, nic->dma_region_len_udp_rx, nic->dma_region_udp_rx, nic->dma_region_addr_udp_rx);
+fail_dma_alloc_tx:
+	return ret;
 }
 
 static int accnet_remove(struct platform_device *pdev)
