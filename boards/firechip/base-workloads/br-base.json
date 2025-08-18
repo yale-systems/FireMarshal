@@ -26,6 +26,7 @@
       [ "test/ifconfig", "/root/ifconfig"],
       [ "test/arp", "/root/arp"],
       [ "test/", "/root/test/"],
-      [ "../../drivers", "/root/drivers/"]
+      [ "../../drivers", "/root/drivers/"],
+      [ "/home/an683/chipyard-io/software/firemarshal/boards/default/lib", "/root/lib/"]
   ]
 }

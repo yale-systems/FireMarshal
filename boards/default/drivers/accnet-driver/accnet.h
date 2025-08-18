@@ -136,13 +136,13 @@ struct accnet_device {
 
 	// DMA buffer UDP TX
 	size_t dma_region_len_udp_tx;
-	void *dma_region_udp_tx;
-	dma_addr_t dma_region_addr_udp_tx;
+	void *dma_region_udp_tx, *dma_region_udp_tx_aligned;
+	dma_addr_t dma_region_addr_udp_tx, dma_region_addr_udp_tx_aligned;
 
 	// DMA buffer UDP RX
 	size_t dma_region_len_udp_rx;
-	void *dma_region_udp_rx;
-	dma_addr_t dma_region_addr_udp_rx;
+	void *dma_region_udp_rx, *dma_region_udp_rx_aligned;
+	dma_addr_t dma_region_addr_udp_rx, dma_region_addr_udp_rx_aligned;
 
 	resource_size_t hw_regs_control_size;
 	phys_addr_t hw_regs_control_phys;

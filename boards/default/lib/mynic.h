@@ -11,3 +11,31 @@
 #define accnet_reg_write8(base, reg, val) (((volatile uint8_t *)(base))[(reg)/1]) = val
 
 #define MAP_INDEX(idx) (((uint64_t) idx) << 40)
+
+// UDP RX Engine registers
+#define ACCNET_UDP_RX_RING_BASE            0x00
+#define ACCNET_UDP_RX_RING_SIZE            0x08
+#define ACCNET_UDP_RX_RING_HEAD            0x0C
+#define ACCNET_UDP_RX_RING_TAIL            0x10
+
+// UDP TX Engine registers
+#define ACCNET_UDP_TX_RING_BASE            0x00
+#define ACCNET_UDP_TX_RING_SIZE            0x08
+#define ACCNET_UDP_TX_RING_HEAD            0x0C
+#define ACCNET_UDP_TX_RING_TAIL            0x10
+#define ACCNET_UDP_TX_MTU                  0x14
+#define ACCNET_UDP_TX_HDR_MAC_SRC          0x20
+#define ACCNET_UDP_TX_HDR_MAC_DST          0x28
+#define ACCNET_UDP_TX_HDR_IP_SRC           0x30
+#define ACCNET_UDP_TX_HDR_IP_DST           0x34
+#define ACCNET_UDP_TX_HDR_IP_TOS           0x38
+#define ACCNET_UDP_TX_HDR_IP_TTL           0x39
+#define ACCNET_UDP_TX_HDR_IP_ID            0x3A
+#define ACCNET_UDP_TX_HDR_UDP_SRC_PORT     0x40
+#define ACCNET_UDP_TX_HDR_UDP_DST_PORT     0x42
+#define ACCNET_UDP_TX_HDR_UDP_CSUM         0x44
+
+// Control registers
+#define ACCNET_CTRL_INTR_MASK              0x00
+#define ACCNET_CTRL_FILTER_PORT            0x08
+#define ACCNET_CTRL_FILTER_IP              0x10

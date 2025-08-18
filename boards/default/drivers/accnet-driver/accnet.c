@@ -610,14 +610,14 @@ static void init_udp_engine(struct net_device *ndev) {
 	struct accnet_device *nic = netdev_priv(ndev);
 
 	/* RX */
-	u64 rx_base = (u64)nic->dma_region_addr_udp_rx;
+	u64 rx_base = (u64)nic->dma_region_addr_udp_rx_aligned;
 	iowrite64(rx_base, 		  		 REG(nic->iomem_udp_rx, ACCNET_UDP_RX_RING_BASE));
 	iowrite32(ACCNET_UDP_RING_SIZE,  REG(nic->iomem_udp_rx, ACCNET_UDP_RX_RING_SIZE));
 	iowrite32(0,              		 REG(nic->iomem_udp_rx, ACCNET_UDP_RX_RING_HEAD));
 	iowrite32(0,              		 REG(nic->iomem_udp_rx, ACCNET_UDP_RX_RING_TAIL));
 
 	/* TX ring */
-	u64 tx_base = (u64)nic->dma_region_addr_udp_tx;
+	u64 tx_base = (u64)nic->dma_region_addr_udp_tx_aligned;
 	iowrite64(tx_base, 		  		 REG(nic->iomem_udp_tx, ACCNET_UDP_TX_RING_BASE));
 	iowrite32(ACCNET_UDP_RING_SIZE,  REG(nic->iomem_udp_tx, ACCNET_UDP_TX_RING_SIZE));
 	iowrite32(0,              		 REG(nic->iomem_udp_tx, ACCNET_UDP_TX_RING_HEAD));
@@ -662,6 +662,7 @@ static int accnet_probe(struct platform_device *pdev)
 	struct net_device *ndev;
 	struct accnet_device *nic;
 	int ret;
+	size_t delta;
 
 	if (!dev->of_node)
 		return -ENODEV;
@@ -673,6 +674,7 @@ static int accnet_probe(struct platform_device *pdev)
 	dev_set_drvdata(dev, ndev);
 	nic = netdev_priv(ndev);
 	nic->dev = dev;
+	nic->magic = MAGIC_CHAR;
 
 	netif_napi_add(ndev, &nic->napi, accnet_poll);
 
@@ -714,22 +716,34 @@ static int accnet_probe(struct platform_device *pdev)
 			ndev->dev_addr[5]);
 
 	// Allocate DMA buffer UDP TX
-	nic->dma_region_len_udp_tx = ACCNET_UDP_RING_SIZE * 2;
-	nic->dma_region_udp_tx = dma_alloc_coherent(dev, nic->dma_region_len_udp_tx, &nic->dma_region_addr_udp_tx, GFP_KERNEL | __GFP_ZERO);
+	nic->dma_region_len_udp_tx = ACCNET_UDP_RING_SIZE;
+	nic->dma_region_udp_tx = dma_alloc_coherent(dev, nic->dma_region_len_udp_tx + (ALIGN_BYTES - 1), 
+												&nic->dma_region_addr_udp_tx, GFP_KERNEL | __GFP_ZERO);
 	if (!nic->dma_region_udp_tx) {
 		ret = -ENOMEM;
 		goto fail_dma_alloc_tx;
 	}
-	dev_info(dev, "Allocated DMA UDP_TX region virt %p, phys %p", nic->dma_region_udp_tx, (void *)nic->dma_region_addr_udp_tx);
+	nic->dma_region_addr_udp_tx_aligned = ALIGN(nic->dma_region_addr_udp_tx, ALIGN_BYTES);
+	delta       	= nic->dma_region_addr_udp_tx_aligned - nic->dma_region_addr_udp_tx;
+	nic->dma_region_udp_tx_aligned 		= (void *)((uintptr_t)nic->dma_region_udp_tx + delta);
+
+	dev_info(dev, "Allocated DMA UDP_TX region virt %p, phys %p", 
+			nic->dma_region_udp_tx_aligned, (void *)nic->dma_region_addr_udp_tx_aligned);
 	
 	// Allocate DMA buffer UDP RX
-	nic->dma_region_len_udp_rx = ACCNET_UDP_RING_SIZE * 2;
-	nic->dma_region_udp_rx = dma_alloc_coherent(dev, nic->dma_region_len_udp_rx, &nic->dma_region_addr_udp_rx, GFP_KERNEL | __GFP_ZERO);
+	nic->dma_region_len_udp_rx = ACCNET_UDP_RING_SIZE;
+	nic->dma_region_udp_rx = dma_alloc_coherent(dev, nic->dma_region_len_udp_rx + (ALIGN_BYTES - 1), 
+												&nic->dma_region_addr_udp_rx, GFP_KERNEL | __GFP_ZERO);
 	if (!nic->dma_region_udp_rx) {
 		ret = -ENOMEM;
 		goto fail_dma_alloc;
 	}
-	dev_info(dev, "Allocated DMA UDP_RX region virt %p, phys %p", nic->dma_region_udp_rx, (void *)nic->dma_region_addr_udp_rx);
+	nic->dma_region_addr_udp_rx_aligned = ALIGN(nic->dma_region_addr_udp_rx, ALIGN_BYTES);
+	delta       	= nic->dma_region_addr_udp_rx_aligned - nic->dma_region_addr_udp_rx;
+	nic->dma_region_udp_rx_aligned 		= (void *)((uintptr_t)nic->dma_region_udp_rx + delta);
+
+	dev_info(dev, "Allocated DMA UDP_RX region virt %p, phys %p", 
+			nic->dma_region_udp_rx_aligned, (void *)nic->dma_region_addr_udp_rx_aligned);
 
 	// Register the misc device
 	// Initialize the miscdevice structure
@@ -751,9 +765,9 @@ static int accnet_probe(struct platform_device *pdev)
 	return 0;
 
 fail_misc_register:
-	dma_free_coherent(dev, nic->dma_region_len_udp_tx, nic->dma_region_udp_tx, nic->dma_region_addr_udp_tx);
+	dma_free_coherent(dev, nic->dma_region_len_udp_tx + (ALIGN_BYTES - 1), nic->dma_region_udp_tx, nic->dma_region_addr_udp_tx);
 fail_dma_alloc:
-	dma_free_coherent(dev, nic->dma_region_len_udp_rx, nic->dma_region_udp_rx, nic->dma_region_addr_udp_rx);
+	dma_free_coherent(dev, nic->dma_region_len_udp_rx + (ALIGN_BYTES - 1), nic->dma_region_udp_rx, nic->dma_region_addr_udp_rx);
 fail_dma_alloc_tx:
 	return ret;
 }
@@ -766,6 +780,8 @@ static int accnet_remove(struct platform_device *pdev)
 	ndev = platform_get_drvdata(pdev);
 	nic = netdev_priv(ndev);
 	netif_napi_del(&nic->napi);
+	dma_free_coherent(nic->dev, nic->dma_region_len_udp_tx + (ALIGN_BYTES - 1), nic->dma_region_udp_tx, nic->dma_region_addr_udp_tx);
+	dma_free_coherent(nic->dev, nic->dma_region_len_udp_rx + (ALIGN_BYTES - 1), nic->dma_region_udp_rx, nic->dma_region_addr_udp_rx);
 	unregister_netdev(ndev);
 
 	return 0;

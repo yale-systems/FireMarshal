@@ -16,6 +16,12 @@
 
 #define DEBUG 0
 
+#define DMA_ALIGN(x) (((x) + 63) & ~63)
+
+#define UDP_TEST_LEN 2048
+#define UDP_RING_SIZE 4096
+#define UDP_ARRAY_LEN DMA_ALIGN(UDP_RING_SIZE)
+
 const uint32_t buffer_size = 1400;
 const uint32_t mtu = 1472;
 
@@ -65,11 +71,15 @@ int main(int argc, char **argv) {
     volatile uint8_t *regs;
     volatile uint8_t *udp_tx_regs, *udp_rx_regs;
     void *udp_tx_buffer, *udp_rx_buffer;
+    void *udp_tx_buffer_aligned, *udp_rx_buffer_aligned;
+    uintptr_t p;
 
-    size_t udp_tx_size = 16 * 1024;
-    size_t udp_rx_size = 16 * 1024;
+    size_t udp_tx_size = 8 * 1024;
+    size_t udp_rx_size = 8 * 1024;
 
-    uint32_t payload_size = 256;
+    const size_t ALIGN = 64;
+
+    uint32_t payload_size = 1024;
 
     fd = open("/dev/accnet-misc", O_RDWR | O_SYNC);
     if (fd < 0) {
@@ -78,8 +88,8 @@ int main(int argc, char **argv) {
     }
 
     if (do_ioctl(fd, 0, &regs_offset, &regs_size) != 0 ||
-    do_ioctl(fd, 1, &udp_rx_offset, &udp_tx_regs_size) != 0 ||
-    do_ioctl(fd, 2, &udp_tx_offset, &udp_rx_regs_size) != 0) 
+    do_ioctl(fd, 1, &udp_tx_offset, &udp_tx_regs_size) != 0 ||
+    do_ioctl(fd, 2, &udp_rx_offset, &udp_rx_regs_size) != 0) 
     {
         close(fd);
         return -1;
@@ -110,22 +120,47 @@ int main(int argc, char **argv) {
         return -1;
     }
 
-    udp_tx_buffer = mmap(NULL, udp_tx_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, MAP_INDEX(3));
+    udp_tx_buffer = mmap(NULL, udp_tx_size + (ALIGN - 1), PROT_READ | PROT_WRITE, MAP_SHARED, fd, MAP_INDEX(3));
     if (udp_tx_buffer == MAP_FAILED) {
         perror("mmap udp tx");
         close(fd);
         return -1;
     }
+    p = (uintptr_t)udp_tx_buffer;
+    udp_tx_buffer_aligned = (void *)((p + (ALIGN - 1)) & ~(uintptr_t)(ALIGN - 1));
 
-    udp_rx_buffer = mmap(NULL, udp_rx_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, MAP_INDEX(4));
+    udp_rx_buffer = mmap(NULL, udp_rx_size + (ALIGN - 1), PROT_READ | PROT_WRITE, MAP_SHARED, fd, MAP_INDEX(4));
     if (udp_rx_buffer == MAP_FAILED) {
         perror("mmap udp rx");
         close(fd);
         return -1;
     }
+    p = (uintptr_t)udp_rx_buffer;
+    udp_rx_buffer_aligned = (void *)((p + (ALIGN - 1)) & ~(uintptr_t)(ALIGN - 1));
 
     /* Initialize udp on nic registers */
-    // accnet_reg_write32(regs, 0x000140, 0x35064de2 & 0xffffffff);  // 0c:42:a1:a8:2d:e6
+    // Contor registers
+	accnet_reg_write32(regs, ACCNET_CTRL_FILTER_PORT, 1234);
+	accnet_reg_write32(regs, ACCNET_CTRL_FILTER_IP,   0xA000001); // 10.0.0.1
+	// RX
+	accnet_reg_write32(udp_rx_regs, ACCNET_UDP_RX_RING_SIZE, UDP_RING_SIZE);
+	// accnet_reg_write32(udp_rx_regs, ACCNET_UDP_RX_RING_HEAD, 0);
+	// accnet_reg_write32(udp_rx_regs, ACCNET_UDP_RX_RING_TAIL, 0);
+	// TX
+	accnet_reg_write32(udp_tx_regs, ACCNET_UDP_TX_RING_SIZE, UDP_RING_SIZE);
+	// accnet_reg_write32(udp_tx_regs, ACCNET_UDP_TX_RING_HEAD, 0);
+	// accnet_reg_write32(udp_tx_regs, ACCNET_UDP_TX_RING_TAIL, 0);
+	accnet_reg_write16(udp_tx_regs, ACCNET_UDP_TX_MTU, 1472);
+	accnet_reg_write64(udp_tx_regs, ACCNET_UDP_TX_HDR_MAC_SRC, 0x112233445566); 
+	accnet_reg_write64(udp_tx_regs, ACCNET_UDP_TX_HDR_MAC_DST, 0x0c42a1a82de6);// 0c:42:a1:a8:2d:e6
+	accnet_reg_write32(udp_tx_regs, ACCNET_UDP_TX_HDR_IP_SRC, 0x0a0b0c0d);
+	accnet_reg_write32(udp_tx_regs, ACCNET_UDP_TX_HDR_IP_DST, 0x0A000001);
+	accnet_reg_write8 (udp_tx_regs, ACCNET_UDP_TX_HDR_IP_TOS, 0);
+	accnet_reg_write8 (udp_tx_regs, ACCNET_UDP_TX_HDR_IP_TTL, 64);
+	accnet_reg_write16(udp_tx_regs, ACCNET_UDP_TX_HDR_IP_ID, 0);
+	accnet_reg_write16(udp_tx_regs, ACCNET_UDP_TX_HDR_UDP_SRC_PORT, 1111);
+	accnet_reg_write16(udp_tx_regs, ACCNET_UDP_TX_HDR_UDP_DST_PORT, 1234);
+	// accnet_reg_write8(udp_tx_regs, ACCNET_UDP_TX_HDR_UDP_CSUM, 1500);
 
     /* Initializing payload */
     uint8_t payload[payload_size];
@@ -134,7 +169,7 @@ int main(int argc, char **argv) {
     }
 
     /* Run Test */
-    test_nic_udp(udp_tx_buffer, udp_rx_buffer, regs, udp_tx_regs, udp_rx_regs,
+    test_nic_udp(udp_tx_buffer_aligned, udp_rx_buffer_aligned, regs, udp_tx_regs, udp_rx_regs,
         payload, payload_size); 
 
     /* Cleanup */
@@ -152,11 +187,52 @@ void test_nic_udp(void* udp_tx_buffer, void* udp_rx_buffer, volatile uint8_t *re
     volatile uint8_t *udp_tx_regs, volatile uint8_t *udp_rx_regs,
     uint8_t payload[], uint32_t payload_size)
 {
-    // uint32_t rx_head, rx_tail;
-    // uint32_t head, tail;
+    uint32_t rx_head, rx_tail, rx_size;
+    uint32_t tx_head, tx_tail, tx_size;
 
-    // // Read buffer head/tail
-    // head = accnet_reg_read32(regs, 0x000128);
-    // tail = accnet_reg_read32(regs, 0x00012c);
+    // Read buffer head/tail
+    rx_head = accnet_reg_read32(udp_rx_regs, ACCNET_UDP_RX_RING_HEAD);
+    rx_tail = accnet_reg_read32(udp_rx_regs, ACCNET_UDP_RX_RING_TAIL);
+    rx_size = accnet_reg_read32(udp_rx_regs, ACCNET_UDP_RX_RING_SIZE);
+
+    tx_head = accnet_reg_read32(udp_tx_regs, ACCNET_UDP_TX_RING_HEAD);
+    tx_tail = accnet_reg_read32(udp_tx_regs, ACCNET_UDP_TX_RING_TAIL);
+    tx_size = accnet_reg_read32(udp_tx_regs, ACCNET_UDP_TX_RING_SIZE);
+
+    printf("RX_HEAD: %u, RX_TAIL: %u, RX_SIZE: %u\n", rx_head, rx_tail, rx_size);
+    printf("TX_HEAD: %u, TX_TAIL: %u, TX_SIZE: %u\n", tx_head, tx_tail, tx_size);
+
+    printf("Copying mem...\n");
+    memcpy(udp_tx_buffer, payload, payload_size);
+
+    uint32_t val = (tx_tail + payload_size) % UDP_RING_SIZE;
+    printf("Updating tx tail to %u...\n", val);
+    accnet_reg_write32(udp_tx_regs, ACCNET_UDP_TX_RING_TAIL, val);
+
+    printf("sleeping for 1 second\n");
+    sleep(1);
+
+    // Read buffer head/tail
+    tx_head = accnet_reg_read32(udp_tx_regs, ACCNET_UDP_TX_RING_HEAD);
+    tx_tail = accnet_reg_read32(udp_tx_regs, ACCNET_UDP_TX_RING_TAIL);
+    tx_size = accnet_reg_read32(udp_tx_regs, ACCNET_UDP_TX_RING_SIZE);
+    printf("TX_HEAD: %u, TX_TAIL: %u, TX_SIZE: %u\n", tx_head, tx_tail, tx_size);
+
+    rx_head = accnet_reg_read32(udp_rx_regs, ACCNET_UDP_RX_RING_HEAD);
+    rx_tail = accnet_reg_read32(udp_rx_regs, ACCNET_UDP_RX_RING_TAIL);
+    rx_size = accnet_reg_read32(udp_rx_regs, ACCNET_UDP_RX_RING_SIZE);
+    printf("RX_HEAD: %u, RX_TAIL: %u, RX_SIZE: %u\n", rx_head, rx_tail, rx_size);
+
+
+    printf("Original Payload:\n");
+    for (uint32_t i = 0; i < payload_size; i++) {
+        printf("%02x", payload[i]);
+    }
+    printf("\n");
+    printf("RX Payload:\n");
+    for (uint32_t i = 0; i < payload_size; i++) {
+        printf("%02x", ((uint8_t*)udp_rx_buffer)[i]);
+    }
+    printf("\n");
 
 }

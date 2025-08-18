@@ -120,72 +120,87 @@ static int accnet_misc_mmap(struct file *filp, struct vm_area_struct *vma)
 {
     struct accnet_device *nic = filp->private_data;
 
-    const unsigned idx_bits = 40 - PAGE_SHIFT;
-    int index;
-    unsigned long off_pages, req_len_ul;
-    u64 req_len, req_start;  /* keep wide math for overflow checks */
+	int index;
+	u64 pgoff, req_len, req_start;
 
-    if (vma->vm_end < vma->vm_start)
-        return -EINVAL;
+	unsigned long phys = 0;
+	unsigned long psize;
 
-    if (!(vma->vm_flags & VM_SHARED))
-        return -EINVAL;
+	index = vma->vm_pgoff >> (40 - PAGE_SHIFT);
+	req_len = vma->vm_end - vma->vm_start;
+	pgoff = vma->vm_pgoff & ((1U << (40 - PAGE_SHIFT)) - 1);
+	req_start = pgoff << PAGE_SHIFT;
 
-    index     = vma->vm_pgoff >> idx_bits;
-    off_pages = vma->vm_pgoff & ((1UL << idx_bits) - 1);   /* note 1UL */
-    req_len   = (u64)vma->vm_end - (u64)vma->vm_start;
-    req_len_ul = vma->vm_end - vma->vm_start;              /* for APIs needing unsigned long */
-    req_start = (u64)off_pages << PAGE_SHIFT;
+	if (vma->vm_end < vma->vm_start)
+		return -EINVAL;
+
+	if ((vma->vm_flags & VM_SHARED) == 0)
+		return -EINVAL;
+
+	pr_info("mmap: pgoff=%#lx size=%#lx\n", vma->vm_pgoff, vma->vm_end - vma->vm_start);
 
     switch (index) {
     case 0: { /* control MMIO */
-        if (req_start + req_len < req_start || req_start + req_len > nic->hw_regs_control_size)
-            return -EINVAL;
+        if (req_start + req_len > nic->hw_regs_control_size)
+			return -EINVAL;
 
-        return vm_iomap_memory(vma, nic->hw_regs_control_phys + req_start, req_len_ul);
+		return io_remap_pfn_range(vma, vma->vm_start,
+				(nic->hw_regs_control_phys >> PAGE_SHIFT) + pgoff,
+				req_len, pgprot_noncached(vma->vm_page_prot));
     }
     case 1: { /* UDP TX regs MMIO */
-        if (req_start + req_len < req_start || req_start + req_len > nic->hw_regs_udp_tx_size)
-            return -EINVAL;
+        if (req_start + req_len > nic->hw_regs_udp_tx_size)
+			return -EINVAL;
 
-        return vm_iomap_memory(vma, nic->hw_regs_udp_tx_phys + req_start, req_len_ul);
+		return io_remap_pfn_range(vma, vma->vm_start,
+				(nic->hw_regs_udp_tx_phys >> PAGE_SHIFT) + pgoff,
+				req_len, pgprot_noncached(vma->vm_page_prot));
     }
     case 2: { /* UDP RX regs MMIO */
-        if (req_start + req_len < req_start || req_start + req_len > nic->hw_regs_udp_rx_size)
-            return -EINVAL;
+        if (req_start + req_len > nic->hw_regs_udp_rx_size)
+			return -EINVAL;
 
-        return vm_iomap_memory(vma, nic->hw_regs_udp_rx_phys + req_start, req_len_ul);
+		return io_remap_pfn_range(vma, vma->vm_start,
+				(nic->hw_regs_udp_rx_phys >> PAGE_SHIFT) + pgoff,
+				req_len, pgprot_noncached(vma->vm_page_prot));
     }
     case 3: { /* UDP TX DMA buffer (coherent) */
-        dma_addr_t dma = nic->dma_region_addr_udp_tx;
-        size_t     size = nic->dma_region_len_udp_tx;
+		pr_info("udp_tx: cpu=%p dma=%p len=%#zx\n",
+            nic->dma_region_udp_tx, &nic->dma_region_addr_udp_tx, nic->dma_region_len_udp_tx);
 
-        if (req_start + req_len < req_start || req_start + req_len > size)
-            return -EINVAL;
+        phys = virt_to_phys(nic->dma_region_udp_tx);  // Convert virtual to physical address
+        psize = nic->dma_region_len_udp_tx;
 
-        // vma->vm_flags |= VM_DONTEXPAND | VM_DONTDUMP; /* no VM_IO here */
-        /* dma_mmap_coherent wants PFN of dma handle + offset */
-        vma->vm_pgoff = (dma >> PAGE_SHIFT) + off_pages;
+		if (req_len > psize)
+		{
+			printk("*** 2: req_len = %llu,  psize = %lu *** \n", req_len, psize);
+			return -EINVAL;
+		}
 
-        return dma_mmap_coherent(nic->dev, vma,
-                                 nic->dma_region_udp_tx,   /* cpu addr */
-                                 dma,                      /* dma handle */
-                                 req_len_ul);
+		vm_flags_mod(vma, VM_IO | VM_DONTEXPAND | VM_DONTDUMP, 0);
+		vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
+		vma->vm_pgoff = 0;
+		
+		return dma_mmap_coherent(nic->dev, vma, nic->dma_region_udp_tx, nic->dma_region_addr_udp_tx, req_len);
     }
     case 4: { /* UDP RX DMA buffer (coherent) */
-        dma_addr_t dma = nic->dma_region_addr_udp_rx;
-        size_t     size = nic->dma_region_len_udp_rx;
+		pr_info("udp_rx: cpu=%p dma=%p len=%#zx\n",
+            nic->dma_region_udp_rx, &nic->dma_region_addr_udp_rx, nic->dma_region_len_udp_rx);
 
-        if (req_start + req_len < req_start || req_start + req_len > size)
-            return -EINVAL;
+        phys = virt_to_phys(nic->dma_region_udp_rx);  // Convert virtual to physical address
+        psize = nic->dma_region_len_udp_rx;
 
-        // vma->vm_flags |= VM_DONTEXPAND | VM_DONTDUMP;
-        vma->vm_pgoff = (dma >> PAGE_SHIFT) + off_pages;
+		if (req_len > psize)
+		{
+			printk("*** 3: req_len = %llu,  psize = %lu *** \n", req_len, psize);
+			return -EINVAL;
+		}
 
-        return dma_mmap_coherent(nic->dev, vma,
-                                 nic->dma_region_udp_rx,
-                                 dma,
-                                 req_len_ul);
+		vm_flags_mod(vma, VM_IO | VM_DONTEXPAND | VM_DONTDUMP, 0);
+		vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
+		vma->vm_pgoff = 0;
+		
+		return dma_mmap_coherent(nic->dev, vma, nic->dma_region_udp_rx, nic->dma_region_addr_udp_rx, req_len);
     }
     default:
         dev_err(nic->dev, "%s: unknown region index=%d pgoff=0x%lx\n",
