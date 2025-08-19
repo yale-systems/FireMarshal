@@ -720,6 +720,7 @@ static int accnet_probe(struct platform_device *pdev)
 	nic->dma_region_udp_tx = dma_alloc_coherent(dev, nic->dma_region_len_udp_tx + (ALIGN_BYTES - 1), 
 												&nic->dma_region_addr_udp_tx, GFP_KERNEL | __GFP_ZERO);
 	if (!nic->dma_region_udp_tx) {
+		dev_err(dev, "Failed to allocate DMA buffer UDP TX");
 		ret = -ENOMEM;
 		goto fail_dma_alloc_tx;
 	}
@@ -735,6 +736,7 @@ static int accnet_probe(struct platform_device *pdev)
 	nic->dma_region_udp_rx = dma_alloc_coherent(dev, nic->dma_region_len_udp_rx + (ALIGN_BYTES - 1), 
 												&nic->dma_region_addr_udp_rx, GFP_KERNEL | __GFP_ZERO);
 	if (!nic->dma_region_udp_rx) {
+		dev_err(dev, "Failed to allocate DMA buffer UDP RX");
 		ret = -ENOMEM;
 		goto fail_dma_alloc;
 	}

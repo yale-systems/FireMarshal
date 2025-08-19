@@ -1,3 +1,12 @@
+#ifndef __ACCNET_LIB_H
+#define __ACCNET_LIB_H
+
+#include <sys/types.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <stddef.h>
+
 #define accnet_reg_read64(base, reg) (((volatile uint64_t *)(base))[(reg)/8])
 #define accnet_reg_write64(base, reg, val) (((volatile uint64_t *)(base))[(reg)/8]) = val
 
@@ -39,3 +48,26 @@
 #define ACCNET_CTRL_INTR_MASK              0x00
 #define ACCNET_CTRL_FILTER_PORT            0x08
 #define ACCNET_CTRL_FILTER_IP              0x10
+
+struct accnet_info {
+    bool is_open;
+
+    int fd;
+    size_t ALIGN;
+    
+    off_t regs_offset, udp_tx_offset, udp_rx_offset;
+    size_t regs_size, udp_tx_regs_size, udp_rx_regs_size;
+
+    volatile uint8_t *regs;
+    volatile uint8_t *udp_tx_regs, *udp_rx_regs;
+    void *udp_tx_buffer, *udp_rx_buffer;
+    void *udp_tx_buffer_aligned, *udp_rx_buffer_aligned;
+
+    size_t udp_tx_size;
+    size_t udp_rx_size;
+};
+
+int accnet_open(char *file, struct accnet_info *accnet, bool do_init);
+int accnet_close(struct accnet_info *accnet);
+
+#endif /* ACCNET_LIB_H */

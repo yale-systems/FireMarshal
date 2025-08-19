@@ -21,8 +21,8 @@ LDFLAGS  += --sysroot=$(SYSROOT)
 endif
 
 TARGET = mynic
-SRCS   = mynic.c
-HDRS   = mynic.h accnet_ioctl.h
+SRCS   = mynic.c accnet_lib.c
+HDRS   = mynic.h accnet_ioctl.h accnet_lib.h
 OBJS   = $(SRCS:.c=.o)
 DEPS   = $(OBJS:.o=.d)
 

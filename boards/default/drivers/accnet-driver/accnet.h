@@ -66,7 +66,7 @@
 #define ACCNET_TX_INTR_CLEAR (ACCNET_TX_BASE + 0x1C)
 
 /* UDP */
-#define ACCNET_UDP_RING_SIZE 16 * 1024
+#define ACCNET_UDP_RING_SIZE 1024 * 1024
 
 // UDP RX Engine registers
 #define ACCNET_UDP_RX_RING_BASE 0x00
