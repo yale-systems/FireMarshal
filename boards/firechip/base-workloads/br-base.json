@@ -11,9 +11,10 @@
       "source" : "../../linux",
       "config" : "linux-config",
       "modules" : {
-          "icenet" : "../../drivers/icenet-driver",
-          "accnet" : "../../drivers/accnet-driver",
-          "iceblk" : "../../drivers/iceblk-driver"
+          "icenet"  : "../../drivers/icenet-driver",
+          "accnet"  : "../../drivers/accnet-driver",
+          "iocache" : "../../drivers/iocache-driver",
+          "iceblk"  : "../../drivers/iceblk-driver"
       }
   },
   "firmware" : {

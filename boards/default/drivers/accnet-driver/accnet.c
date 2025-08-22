@@ -784,6 +784,7 @@ static int accnet_remove(struct platform_device *pdev)
 	netif_napi_del(&nic->napi);
 	dma_free_coherent(nic->dev, nic->dma_region_len_udp_tx + (ALIGN_BYTES - 1), nic->dma_region_udp_tx, nic->dma_region_addr_udp_tx);
 	dma_free_coherent(nic->dev, nic->dma_region_len_udp_rx + (ALIGN_BYTES - 1), nic->dma_region_udp_rx, nic->dma_region_addr_udp_rx);
+	misc_register(&nic->misc_dev);
 	unregister_netdev(ndev);
 
 	return 0;

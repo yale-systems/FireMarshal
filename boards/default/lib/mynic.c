@@ -32,9 +32,9 @@ struct timespec test_udp_latency(struct accnet_info *info, uint8_t payload[], ui
 int main(int argc, char **argv) {
     char *accnet_dev = "/dev/accnet-misc";
     struct accnet_info *info = malloc(sizeof(struct accnet_info));
-    int n_tests = 16;
+    int n_tests = 64;
     bool debug = false;
-    uint32_t payload_size = 16*1024;
+    uint32_t payload_size = 32*1024;
     long total = 0;
     double avg = 0;
 
@@ -54,7 +54,7 @@ int main(int argc, char **argv) {
                 return -1;
             }
             payload_size = (uint32_t) val;
-            printf("Parsed --ring-size = %d\n", payload_size);
+            printf("Parsed --payload-size = %d\n", payload_size);
         }
         else if (strcmp(argv[i], "--debug") == 0) {
             debug = true;
