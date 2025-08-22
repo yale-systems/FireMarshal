@@ -14,6 +14,7 @@
 
 #include "accnet_ioctl.h"
 #include "accnet_lib.h"
+#include "common.h"
 
 static int do_ioctl(int fd, int index, off_t *offset, size_t *size) {
     struct accnet_ioctl_region_info region_info;
@@ -51,28 +52,28 @@ static int do_ioctl(int fd, int index, off_t *offset, size_t *size) {
 /* Initialize udp on nic registers */
 static void init_regs(struct accnet_info *accnet) {
     // Contor registers
-	accnet_reg_write32(accnet->regs, ACCNET_CTRL_FILTER_PORT, 1234);
-	accnet_reg_write32(accnet->regs, ACCNET_CTRL_FILTER_IP,   0x0A000001); // 10.0.0.1
+	reg_write32(accnet->regs, ACCNET_CTRL_FILTER_PORT, 1234);
+	reg_write32(accnet->regs, ACCNET_CTRL_FILTER_IP,   0x0A000001); // 10.0.0.1
 	// RX
-	accnet_reg_write32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_SIZE, 0);
-	accnet_reg_write32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_HEAD, 0);
-	accnet_reg_write32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_TAIL, 0);
+	reg_write32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_SIZE, 0);
+	reg_write32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_HEAD, 0);
+	reg_write32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_TAIL, 0);
 	// TX
-	accnet_reg_write32(accnet->udp_tx_regs, ACCNET_UDP_TX_RING_SIZE, 0);
-	accnet_reg_write32(accnet->udp_tx_regs, ACCNET_UDP_TX_RING_HEAD, 0);
-	accnet_reg_write32(accnet->udp_tx_regs, ACCNET_UDP_TX_RING_TAIL, 0);
+	reg_write32(accnet->udp_tx_regs, ACCNET_UDP_TX_RING_SIZE, 0);
+	reg_write32(accnet->udp_tx_regs, ACCNET_UDP_TX_RING_HEAD, 0);
+	reg_write32(accnet->udp_tx_regs, ACCNET_UDP_TX_RING_TAIL, 0);
 
-	accnet_reg_write16(accnet->udp_tx_regs, ACCNET_UDP_TX_MTU, 1472);
-	accnet_reg_write64(accnet->udp_tx_regs, ACCNET_UDP_TX_HDR_MAC_SRC, 0x112233445566); 
-	accnet_reg_write64(accnet->udp_tx_regs, ACCNET_UDP_TX_HDR_MAC_DST, 0x0c42a1a82de6);// 0c:42:a1:a8:2d:e6
-	accnet_reg_write32(accnet->udp_tx_regs, ACCNET_UDP_TX_HDR_IP_SRC, 0x0a0b0c0d);
-	accnet_reg_write32(accnet->udp_tx_regs, ACCNET_UDP_TX_HDR_IP_DST, 0x0A000001);
-	accnet_reg_write8 (accnet->udp_tx_regs, ACCNET_UDP_TX_HDR_IP_TOS, 0);
-	accnet_reg_write8 (accnet->udp_tx_regs, ACCNET_UDP_TX_HDR_IP_TTL, 64);
-	accnet_reg_write16(accnet->udp_tx_regs, ACCNET_UDP_TX_HDR_IP_ID, 0);
-	accnet_reg_write16(accnet->udp_tx_regs, ACCNET_UDP_TX_HDR_UDP_SRC_PORT, 1111);
-	accnet_reg_write16(accnet->udp_tx_regs, ACCNET_UDP_TX_HDR_UDP_DST_PORT, 1234);
-	// accnet_reg_write8(accnet->udp_tx_regs, ACCNET_UDP_TX_HDR_UDP_CSUM, 1500);
+	reg_write16(accnet->udp_tx_regs, ACCNET_UDP_TX_MTU, 1472);
+	reg_write64(accnet->udp_tx_regs, ACCNET_UDP_TX_HDR_MAC_SRC, 0x112233445566); 
+	reg_write64(accnet->udp_tx_regs, ACCNET_UDP_TX_HDR_MAC_DST, 0x0c42a1a82de6);// 0c:42:a1:a8:2d:e6
+	reg_write32(accnet->udp_tx_regs, ACCNET_UDP_TX_HDR_IP_SRC, 0x0a0b0c0d);
+	reg_write32(accnet->udp_tx_regs, ACCNET_UDP_TX_HDR_IP_DST, 0x0A000001);
+	reg_write8 (accnet->udp_tx_regs, ACCNET_UDP_TX_HDR_IP_TOS, 0);
+	reg_write8 (accnet->udp_tx_regs, ACCNET_UDP_TX_HDR_IP_TTL, 64);
+	reg_write16(accnet->udp_tx_regs, ACCNET_UDP_TX_HDR_IP_ID, 0);
+	reg_write16(accnet->udp_tx_regs, ACCNET_UDP_TX_HDR_UDP_SRC_PORT, 1111);
+	reg_write16(accnet->udp_tx_regs, ACCNET_UDP_TX_HDR_UDP_DST_PORT, 1234);
+	// reg_write8(accnet->udp_tx_regs, ACCNET_UDP_TX_HDR_UDP_CSUM, 1500);
 }
 
 int accnet_open(char *file, struct accnet_info *accnet, bool do_init) {

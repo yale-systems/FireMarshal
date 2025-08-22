@@ -19,8 +19,11 @@
 #include <stdbool.h>
 #include <time.h>
 
+#include "common.h"
 #include "accnet_ioctl.h"
 #include "accnet_lib.h"
+#include "iocache_ioctl.h"
+#include "iocache_lib.h"
 
 #ifndef CLOCK_MONOTONIC
 #define CLOCK_MONOTONIC 1
@@ -75,8 +78,8 @@ int main(int argc, char **argv) {
     }
 
     /* Init rings */
-    accnet_reg_write32(info->udp_tx_regs, ACCNET_UDP_TX_RING_SIZE, info->udp_tx_size);
-    accnet_reg_write32(info->udp_rx_regs, ACCNET_UDP_RX_RING_SIZE, info->udp_rx_size);
+    reg_write32(info->udp_tx_regs, ACCNET_UDP_TX_RING_SIZE, info->udp_tx_size);
+    reg_write32(info->udp_rx_regs, ACCNET_UDP_RX_RING_SIZE, info->udp_rx_size);
 
     /* Run Test */
     for (int i = 0; i < n_tests; i++) {
@@ -102,13 +105,13 @@ struct timespec test_udp_latency(struct accnet_info *info, uint8_t payload[], ui
     uint32_t tx_head, tx_tail, tx_size;
 
     // Read buffer head/tail
-    rx_head = accnet_reg_read32(info->udp_rx_regs, ACCNET_UDP_RX_RING_HEAD);
-    rx_tail = accnet_reg_read32(info->udp_rx_regs, ACCNET_UDP_RX_RING_TAIL);
-    rx_size = accnet_reg_read32(info->udp_rx_regs, ACCNET_UDP_RX_RING_SIZE);
+    rx_head = reg_read32(info->udp_rx_regs, ACCNET_UDP_RX_RING_HEAD);
+    rx_tail = reg_read32(info->udp_rx_regs, ACCNET_UDP_RX_RING_TAIL);
+    rx_size = reg_read32(info->udp_rx_regs, ACCNET_UDP_RX_RING_SIZE);
 
-    tx_head = accnet_reg_read32(info->udp_tx_regs, ACCNET_UDP_TX_RING_HEAD);
-    tx_tail = accnet_reg_read32(info->udp_tx_regs, ACCNET_UDP_TX_RING_TAIL);
-    tx_size = accnet_reg_read32(info->udp_tx_regs, ACCNET_UDP_TX_RING_SIZE);
+    tx_head = reg_read32(info->udp_tx_regs, ACCNET_UDP_TX_RING_HEAD);
+    tx_tail = reg_read32(info->udp_tx_regs, ACCNET_UDP_TX_RING_TAIL);
+    tx_size = reg_read32(info->udp_tx_regs, ACCNET_UDP_TX_RING_SIZE);
 
     if (debug) {
         printf("RX_HEAD: %u, RX_TAIL: %u, RX_SIZE: %u\n", rx_head, rx_tail, rx_size);
@@ -123,22 +126,22 @@ struct timespec test_udp_latency(struct accnet_info *info, uint8_t payload[], ui
 
     clock_gettime(CLOCK_MONOTONIC, &before);
 
-    accnet_reg_write32(info->udp_tx_regs, ACCNET_UDP_TX_RING_TAIL, val);
+    reg_write32(info->udp_tx_regs, ACCNET_UDP_TX_RING_TAIL, val);
     while (rx_tail != (rx_head + payload_size) % info->udp_rx_size) {
-        rx_tail = accnet_reg_read32(info->udp_rx_regs, ACCNET_UDP_RX_RING_TAIL);
+        rx_tail = reg_read32(info->udp_rx_regs, ACCNET_UDP_RX_RING_TAIL);
         if (debug) {
             printf("Waiting for RX (new rx_tail=%u)...\n", rx_tail);
         }
     }
     clock_gettime(CLOCK_MONOTONIC, &after);
 
-    rx_head = accnet_reg_read32(info->udp_rx_regs, ACCNET_UDP_RX_RING_HEAD);
-    rx_size = accnet_reg_read32(info->udp_rx_regs, ACCNET_UDP_RX_RING_SIZE);
+    rx_head = reg_read32(info->udp_rx_regs, ACCNET_UDP_RX_RING_HEAD);
+    rx_size = reg_read32(info->udp_rx_regs, ACCNET_UDP_RX_RING_SIZE);
     
     // Read buffer head/tail
-    tx_head = accnet_reg_read32(info->udp_tx_regs, ACCNET_UDP_TX_RING_HEAD);
-    tx_tail = accnet_reg_read32(info->udp_tx_regs, ACCNET_UDP_TX_RING_TAIL);
-    tx_size = accnet_reg_read32(info->udp_tx_regs, ACCNET_UDP_TX_RING_SIZE);
+    tx_head = reg_read32(info->udp_tx_regs, ACCNET_UDP_TX_RING_HEAD);
+    tx_tail = reg_read32(info->udp_tx_regs, ACCNET_UDP_TX_RING_TAIL);
+    tx_size = reg_read32(info->udp_tx_regs, ACCNET_UDP_TX_RING_SIZE);
 
     if (debug) {
         printf("RX_HEAD: %u, RX_TAIL: %u, RX_SIZE: %u\n", rx_head, rx_tail, rx_size);
@@ -157,7 +160,7 @@ struct timespec test_udp_latency(struct accnet_info *info, uint8_t payload[], ui
     }
 
     // Updating RX HEAD
-    accnet_reg_write32(info->udp_rx_regs, ACCNET_UDP_RX_RING_HEAD, rx_tail);
+    reg_write32(info->udp_rx_regs, ACCNET_UDP_RX_RING_HEAD, rx_tail);
 
     return timespec_diff(&before, &after);
 }
