@@ -1,30 +1,11 @@
-#ifndef __IOCACHE_H
-#define __IOCACHE_H
+#ifndef __IOCACHE_LIB_H
+#define __IOCACHE_LIB_H
 
-#include <linux/miscdevice.h>
-#include <linux/module.h>
-#include <linux/errno.h>
-#include <linux/types.h>
-#include <linux/circ_buf.h>
-
-#include <linux/interrupt.h>
-#include <linux/irq.h>
-#include <linux/irqdomain.h>
-
-#include <linux/of_address.h>
-#include <linux/of_pci.h>
-#include <linux/of_platform.h>
-#include <linux/of_irq.h>
-
-#include <linux/netdevice.h>
-#include <linux/etherdevice.h>
-
-#include <linux/dma-mapping.h>
-#include <linux/miscdevice.h> 
-
-#include <linux/io.h>   /* iowriteXX */
-
-#define IOCACHE_NAME "iocache"
+#include <sys/types.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <stddef.h>
 
 /* ---- Bus parameters ---- */
 #define IOCACHE_BEAT_BYTES   8UL     /* one TileLink beat = 8 bytes = 64 bits */
@@ -64,25 +45,18 @@
 #define IOCACHE_REG_TXCOMP_AWAKE(row)       IOCACHE_REG((row), IOCACHE_TXCOMP_AWAKE_OFF)
 #define IOCACHE_REG_FLAGS(row)         		IOCACHE_REG((row), IOCACHE_FLAGS_OFF)
 
-#define MAGIC_CHAR 0xCCCCCCCCUL
 
-struct iocache_device {
-	struct device *dev;
-	
-	int irq;
+struct iocache_info {
+    int fd;
+    size_t ALIGN;
+    
+    off_t regs_offset;
+    size_t regs_size;
 
-	resource_size_t hw_regs_control_size;
-	phys_addr_t hw_regs_control_phys;
-	void __iomem *iomem;
-
-    struct miscdevice misc_dev; // Add the miscdevice member here	
-	
-	unsigned long magic;
+    volatile uint8_t *regs;
 };
 
-static int iocache_misc_open(struct inode *inode, struct file *filp);
-static int iocache_misc_mmap(struct file *filp, struct vm_area_struct *vma);
-static int iocache_misc_release(struct inode *inode, struct file *filp);
-static long iocache_misc_ioctl(struct file *file, unsigned int cmd, unsigned long arg);
+int iocache_open(char *file, struct iocache_info *iocache);
+int iocache_close(struct iocache_info *iocache);
 
-#endif /* __IOCACHE_H */
+#endif      // __IOCACHE_LIB_H

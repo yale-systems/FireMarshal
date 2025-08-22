@@ -1,5 +1,5 @@
-#ifndef ACCNET_DRIVER_H
-#define ACCNET_DRIVER_H
+#ifndef __ACCNET_DRIVER_H
+#define __ACCNET_DRIVER_H
 
 #include <linux/miscdevice.h>
 #include <linux/module.h>
@@ -166,4 +166,4 @@ static int accnet_misc_open(struct inode *inode, struct file *filp);
 static int accnet_misc_release(struct inode *inode, struct file *filp);
 static long accnet_misc_ioctl(struct file *file, unsigned int cmd, unsigned long arg);
 
-#endif /* ACCNET_DRIVER_H */
+#endif /* __ACCNET_DRIVER_H */

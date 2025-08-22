@@ -130,6 +130,7 @@ static inline void post_send_frag(
 	uint64_t len = frag->bv_len, partial = !last, packet;
 
 	packet = (partial << 63) | (len << 48) | (addr & 0xffffffffffffL);
+	dma_wmb();
 	iowrite64(packet, nic->iomem_tx + ACCNET_TX_REQ);
 }
 
@@ -150,6 +151,7 @@ static inline void post_send(
 	}
 
 	packet = (partial << 63) | (len << 48) | (addr & 0xffffffffffffL);
+	dma_wmb();
 	iowrite64(packet, nic->iomem_tx + ACCNET_TX_REQ);
 
 	for (i = 0; i < shinfo->nr_frags; i++) {
@@ -235,9 +237,9 @@ static int complete_recv(struct net_device *ndev, int budget)
 		addr = (res >> 16) & 0xffffffffffffL;
 		dev_dbg(nic->dev, "Received packet at phys_addr=%lx, virt_addr=%p, len=%d\n", addr, phys_to_virt(addr), len);
 
+		dma_rmb();                 // make NIC's DMA writes visible/ordered
 		skb = sk_buff_cq_pop(&nic->recv_cq);
 		dev_dbg(nic->dev, "skb from recv_cq virt_addr=%p, phys_addr=%lx\n", skb->data, virt_to_phys(skb->data));
-
 
 		skb_put(skb, len);
 		print_skb_data(skb);
@@ -640,6 +642,8 @@ static void init_udp_engine(struct net_device *ndev) {
 	/* If your HW supports writing a UDP checksum value directly:
 	* iowrite16(1500, REG(nic->iomem_udp_tx, ACCNET_UDP_TX_HDR_UDP_CSUM));
 	*/
+
+	wmb();  // order prior MMIO writes before subsequent MMIO/unmask
 }
 
 static const struct net_device_ops accnet_ops = {

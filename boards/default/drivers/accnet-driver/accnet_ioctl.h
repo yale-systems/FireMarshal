@@ -3,8 +3,8 @@
  * Copyright (c) 2019-2023 The Regents of the University of California
  */
 
-#ifndef ACCNET_IOCTL_H
-#define ACCNET_IOCTL_H
+#ifndef __ACCNET_IOCTL_H
+#define __ACCNET_IOCTL_H
 
 #include <linux/types.h>
 
@@ -56,4 +56,4 @@ struct accnet_ioctl_region_info {
 
 #define ACCNET_IOCTL_GET_REGION_INFO _IO(ACCNET_IOCTL_TYPE, ACCNET_IOCTL_BASE + 2)
 
-#endif /* ACCNET_IOCTL_H */
+#endif /* __ACCNET_IOCTL_H */
