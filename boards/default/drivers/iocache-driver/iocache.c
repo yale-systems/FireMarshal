@@ -40,7 +40,12 @@ static const struct file_operations iocache_fops = {
 	.unlocked_ioctl = iocache_misc_ioctl,
 };
 
-static irqreturn_t iocache_isr(int irq, void *data) {
+static irqreturn_t iocache_isr_rx(int irq, void *data) {
+	// Nothing for now
+	return IRQ_HANDLED;
+}
+
+static irqreturn_t iocache_isr_txcomp(int irq, void *data) {
 	// Nothing for now
 	return IRQ_HANDLED;
 }
@@ -53,18 +58,33 @@ static int iocache_parse_irq(struct iocache_device *iocache) {
 	const char *name = of_node_full_name(node);
 	dev_info(dev, "Device Tree node: %s\n", name);
 
-	iocache->irq = irq_of_parse_and_map(node, 0);
-	if (!iocache->irq) {
-    	dev_err(dev, "Failed to parse TX IRQ from DT\n");
+	iocache->rx_irq = irq_of_parse_and_map(node, 0);
+	if (!iocache->rx_irq) {
+    	dev_err(dev, "Failed to parse RX IRQ from DT\n");
 		return -EINVAL;
 	}
 	
-	dev_info(dev, "Requesting TX IRQ %d\n", iocache->irq);
-	err = devm_request_irq(dev, iocache->irq, iocache_isr,
+	dev_info(dev, "Requesting RX IRQ %d\n", iocache->rx_irq);
+	err = devm_request_irq(dev, iocache->rx_irq, iocache_isr_rx,
 			IRQF_SHARED | IRQF_NO_THREAD,
 			IOCACHE_NAME, dev);
 	if (err) {
-		dev_err(dev, "could not obtain irq %d\n", iocache->irq);
+		dev_err(dev, "could not obtain rx irq %d\n", iocache->rx_irq);
+		return err;
+	}
+
+	iocache->txcomp_irq = irq_of_parse_and_map(node, 1);
+	if (!iocache->txcomp_irq) {
+    	dev_err(dev, "Failed to parse TX_COMP IRQ from DT\n");
+		return -EINVAL;
+	}
+	
+	dev_info(dev, "Requesting TX_COMP IRQ %d\n", iocache->txcomp_irq);
+	err = devm_request_irq(dev, iocache->txcomp_irq, iocache_isr_txcomp,
+			IRQF_SHARED | IRQF_NO_THREAD,
+			IOCACHE_NAME, dev);
+	if (err) {
+		dev_err(dev, "could not obtain tx_comp irq %d\n", iocache->txcomp_irq);
 		return err;
 	}
 

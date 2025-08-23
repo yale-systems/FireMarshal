@@ -69,7 +69,8 @@
 struct iocache_device {
 	struct device *dev;
 	
-	int irq;
+	int rx_irq;
+	int txcomp_irq;
 
 	resource_size_t hw_regs_control_size;
 	phys_addr_t hw_regs_control_phys;
