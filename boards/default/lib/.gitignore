@@ -1,3 +1,4 @@
 *.o
 *.d
-mynic
+udp_exp
+interrupt_exp

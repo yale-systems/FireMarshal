@@ -52,7 +52,10 @@ static const struct file_operations iocache_fops = {
 };
 
 static irqreturn_t iocache_isr_rx(int irq, void *data) {
-	struct iocache_device *iocache = data;
+	printk(KERN_INFO "RX interrupt received\n");
+
+	struct device *dev = data;
+	struct iocache_device *iocache = dev_get_drvdata(dev);
     struct eventfd_ctx *ctx = NULL;
 
 	clear_intmask(iocache, IOCACHE_INTMASK_RX);
@@ -67,6 +70,7 @@ static irqreturn_t iocache_isr_rx(int irq, void *data) {
 }
 
 static irqreturn_t iocache_isr_txcomp(int irq, void *data) {
+	printk(KERN_INFO "TX interrupt received\n");
 	// Nothing for now
 	return IRQ_HANDLED;
 }
@@ -144,6 +148,13 @@ static int iocache_probe(struct platform_device *pdev) {
 	if (!dev->of_node)
 		return -ENODEV;
 
+	iocache = devm_kzalloc(dev, sizeof(*iocache), GFP_KERNEL);
+    if (!iocache)
+        return -ENOMEM;
+
+	platform_set_drvdata(pdev, iocache);
+	dev_set_drvdata(dev, iocache);
+	iocache->dev = dev;
 	iocache->magic = MAGIC_CHAR;
 
 	if ((ret = iocache_parse_addr(iocache)) < 0)
@@ -158,6 +169,7 @@ static int iocache_probe(struct platform_device *pdev) {
     iocache->misc_dev.minor = MISC_DYNAMIC_MINOR;
     iocache->misc_dev.name = "iocache-misc";
     iocache->misc_dev.fops = &iocache_fops;
+	iocache->misc_dev.parent = dev;
 
 	ret = misc_register(&iocache->misc_dev);
 	if (ret) {

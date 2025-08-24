@@ -11,10 +11,10 @@
       "source" : "../../linux",
       "config" : "linux-config",
       "modules" : {
-          "icenet"  : "../../drivers/icenet-driver",
-          "accnet"  : "../../drivers/accnet-driver",
+          "iceblk"  : "../../drivers/iceblk-driver",
           "iocache" : "../../drivers/iocache-driver",
-          "iceblk"  : "../../drivers/iceblk-driver"
+          "icenet"  : "../../drivers/icenet-driver",
+          "accnet"  : "../../drivers/accnet-driver"
       }
   },
   "firmware" : {
@@ -27,7 +27,7 @@
       [ "test/ifconfig", "/root/ifconfig"],
       [ "test/arp", "/root/arp"],
       [ "test/", "/root/test/"],
-      [ "../../drivers", "/root/drivers/"],
-      [ "/home/an683/chipyard-io/software/firemarshal/boards/default/lib", "/root/lib/"]
+      [ "/home/an683/chipyard-io/software/firemarshal/boards/default/drivers",  "/root/drivers/"],
+      [ "/home/an683/chipyard-io/software/firemarshal/boards/default/lib",      "/root/lib/"]
   ]
 }

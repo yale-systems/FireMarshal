@@ -117,7 +117,7 @@ static void *recv_thread(void *arg) {
 
 int main(int argc, char **argv) {
     char *accnet_filename = "/dev/accnet-misc";
-    char *iocache_filename = "/dev/iocahe-misc";
+    char *iocache_filename = "/dev/iocache-misc";
     int threads      = 1;
     size_t total_bytes  = 1024;         // not used now
     size_t payload_size = 1024;         // default: 1 KiB
