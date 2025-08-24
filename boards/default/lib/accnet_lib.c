@@ -16,7 +16,7 @@
 #include "accnet_lib.h"
 #include "common.h"
 
-static int do_ioctl(int fd, int index, off_t *offset, size_t *size) {
+static int _accnet_ioctl(int fd, int index, off_t *offset, size_t *size) {
     struct accnet_ioctl_region_info region_info;
     memset(&region_info, 0, sizeof(region_info));
     region_info.argsz = sizeof(region_info);
@@ -50,7 +50,7 @@ static int do_ioctl(int fd, int index, off_t *offset, size_t *size) {
 }
 
 /* Initialize udp on nic registers */
-static void init_regs(struct accnet_info *accnet) {
+static void _init_regs(struct accnet_info *accnet) {
     // Contor registers
 	reg_write32(accnet->regs, ACCNET_CTRL_FILTER_PORT, 1234);
 	reg_write32(accnet->regs, ACCNET_CTRL_FILTER_IP,   0x0A000001); // 10.0.0.1
@@ -76,6 +76,17 @@ static void init_regs(struct accnet_info *accnet) {
 	// reg_write8(accnet->udp_tx_regs, ACCNET_UDP_TX_HDR_UDP_CSUM, 1500);
 }
 
+static void _deinit_regs(struct accnet_info *accnet) {
+	// RX
+	reg_write32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_SIZE, 0);
+	reg_write32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_HEAD, 0);
+	reg_write32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_TAIL, 0);
+	// TX
+	reg_write32(accnet->udp_tx_regs, ACCNET_UDP_TX_RING_SIZE, 0);
+	reg_write32(accnet->udp_tx_regs, ACCNET_UDP_TX_RING_HEAD, 0);
+	reg_write32(accnet->udp_tx_regs, ACCNET_UDP_TX_RING_TAIL, 0);
+}
+
 int accnet_open(char *file, struct accnet_info *accnet, bool do_init) {
     uintptr_t p;
 
@@ -90,9 +101,9 @@ int accnet_open(char *file, struct accnet_info *accnet, bool do_init) {
         return -1;
     }
 
-    if (do_ioctl(accnet->fd, 0, &accnet->regs_offset, &accnet->regs_size) != 0 ||
-    do_ioctl(accnet->fd, 1, &accnet->udp_tx_offset, &accnet->udp_tx_regs_size) != 0 ||
-    do_ioctl(accnet->fd, 2, &accnet->udp_rx_offset, &accnet->udp_rx_regs_size) != 0) 
+    if (_accnet_ioctl(accnet->fd, 0, &accnet->regs_offset, &accnet->regs_size) != 0 ||
+    _accnet_ioctl(accnet->fd, 1, &accnet->udp_tx_offset, &accnet->udp_tx_regs_size) != 0 ||
+    _accnet_ioctl(accnet->fd, 2, &accnet->udp_rx_offset, &accnet->udp_rx_regs_size) != 0) 
     {
         close(accnet->fd);
         return -1;
@@ -135,7 +146,7 @@ int accnet_open(char *file, struct accnet_info *accnet, bool do_init) {
     accnet->udp_rx_buffer = mmap(NULL, accnet->udp_rx_size + (ALIGN - 1), PROT_READ | PROT_WRITE, MAP_SHARED, accnet->fd, MAP_INDEX(4));
     if (accnet->udp_rx_buffer == MAP_FAILED) {
         perror("mmap udp rx");
-        munmap((void *) accnet->udp_tx_regs, accnet->udp_tx_regs_size);
+        munmap((void *)(uintptr_t) accnet->udp_tx_regs, accnet->udp_tx_regs_size);
         close(accnet->fd);
         return -1;
     }
@@ -143,7 +154,7 @@ int accnet_open(char *file, struct accnet_info *accnet, bool do_init) {
     accnet->udp_rx_buffer_aligned = (void *)((p + (ALIGN - 1)) & ~(uintptr_t)(ALIGN - 1));
 
     if (do_init) {
-        init_regs(accnet);
+        _init_regs(accnet);
     }
 
     return 0;
@@ -151,11 +162,12 @@ int accnet_open(char *file, struct accnet_info *accnet, bool do_init) {
 
 /* Cleanup */
 int accnet_close(struct accnet_info *accnet) {
-    munmap((void *) accnet->regs, accnet->regs_size);
-    munmap((void *) accnet->udp_tx_regs, accnet->udp_tx_regs_size);
-    munmap((void *) accnet->udp_rx_regs, accnet->udp_rx_regs_size);
-    munmap((void *) accnet->udp_rx_buffer, accnet->udp_rx_size);
-    munmap((void *) accnet->udp_tx_buffer, accnet->udp_tx_size);
+    _deinit_regs(accnet);
+    munmap((void *)(uintptr_t) accnet->regs, accnet->regs_size);
+    munmap((void *)(uintptr_t) accnet->udp_tx_regs, accnet->udp_tx_regs_size);
+    munmap((void *)(uintptr_t) accnet->udp_rx_regs, accnet->udp_rx_regs_size);
+    munmap((void *)(uintptr_t) accnet->udp_rx_buffer, accnet->udp_rx_size);
+    munmap((void *)(uintptr_t) accnet->udp_tx_buffer, accnet->udp_tx_size);
     close(accnet->fd);
 
     return 0;

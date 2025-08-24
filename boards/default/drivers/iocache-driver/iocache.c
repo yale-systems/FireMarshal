@@ -31,6 +31,17 @@ MODULE_DESCRIPTION("iocache driver");
 MODULE_AUTHOR("Amirmohammad Nazari");
 MODULE_LICENSE("Dual MIT/GPL");
 
+static inline void set_intmask(struct iocache_device *iocache, uint32_t mask)
+{
+	atomic_t *mem = iocache->iomem + IOCACHE_REG_INTMASK;
+	atomic_fetch_or(mask, mem);
+}
+
+static inline void clear_intmask(struct iocache_device *iocache, uint32_t mask)
+{
+	atomic_t *mem = iocache->iomem + IOCACHE_REG_INTMASK;
+	atomic_fetch_and(~mask, mem);
+}
 
 static const struct file_operations iocache_fops = {
     .owner = THIS_MODULE,
@@ -41,8 +52,18 @@ static const struct file_operations iocache_fops = {
 };
 
 static irqreturn_t iocache_isr_rx(int irq, void *data) {
-	// Nothing for now
-	return IRQ_HANDLED;
+	struct iocache_device *iocache = data;
+    struct eventfd_ctx *ctx = NULL;
+
+	clear_intmask(iocache, IOCACHE_INTMASK_RX);
+
+    spin_lock(&iocache->ev_lock);
+    ctx = iocache->ev_ctx;
+    if (ctx)
+        eventfd_signal(ctx, 1);   /* safe to call in hard IRQ */
+    spin_unlock(&iocache->ev_lock);
+
+    return IRQ_HANDLED;
 }
 
 static irqreturn_t iocache_isr_txcomp(int irq, void *data) {
@@ -130,6 +151,8 @@ static int iocache_probe(struct platform_device *pdev) {
 
 	if ((ret = iocache_parse_irq(iocache)) < 0)
 		return ret;
+
+	spin_lock_init(&iocache->ev_lock);
 
 	/* Register the misc device */
     iocache->misc_dev.minor = MISC_DYNAMIC_MINOR;

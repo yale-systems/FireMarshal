@@ -10,12 +10,12 @@
 #include <linux/interrupt.h>
 #include <linux/irq.h>
 #include <linux/irqdomain.h>
-
+#include <linux/eventfd.h>
 #include <linux/of_address.h>
 #include <linux/of_pci.h>
 #include <linux/of_platform.h>
 #include <linux/of_irq.h>
-
+#include <linux/spinlock.h>
 #include <linux/netdevice.h>
 #include <linux/etherdevice.h>
 
@@ -64,6 +64,10 @@
 #define IOCACHE_REG_TXCOMP_SUSPENDED(row)   IOCACHE_REG((row), IOCACHE_TXCOMP_SUSPENDED_OFF)
 #define IOCACHE_REG_FLAGS(row)         		IOCACHE_REG((row), IOCACHE_FLAGS_OFF)
 
+#define IOCACHE_INTMASK_RX 			1
+#define IOCACHE_INTMASK_TXCOMP 		2
+#define IOCACHE_INTMASK_BOTH 		3
+
 #define MAGIC_CHAR 0xCCCCCCCCUL
 
 struct iocache_device {
@@ -77,6 +81,9 @@ struct iocache_device {
 	void __iomem *iomem;
 
     struct miscdevice misc_dev; // Add the miscdevice member here	
+
+	struct eventfd_ctx *ev_ctx;  /* signaled from IRQ */
+    spinlock_t          ev_lock; /* protects ev_ctx */
 	
 	unsigned long magic;
 };

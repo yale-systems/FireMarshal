@@ -21,8 +21,9 @@
 
 #include "common.h"
 #include "accnet_ioctl.h"
-#include "accnet_lib.h"
 #include "iocache_ioctl.h"
+
+#include "accnet_lib.h"
 #include "iocache_lib.h"
 
 #ifndef CLOCK_MONOTONIC
@@ -119,7 +120,7 @@ struct timespec test_udp_latency(struct accnet_info *info, uint8_t payload[], ui
     }
 
     if (debug) printf("Copying mem...\n");
-    memcpy(info->udp_tx_buffer + rx_tail, payload, payload_size);
+    memcpy((char *)info->udp_tx_buffer + tx_tail, payload, payload_size);
 
     uint32_t val = (tx_tail + payload_size) % info->udp_tx_size;
     if (debug) printf("Begin Test... (new_tail=%u) \n", val);

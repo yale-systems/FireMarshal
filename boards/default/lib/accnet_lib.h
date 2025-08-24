@@ -7,6 +7,8 @@
 #include <stdlib.h>
 #include <stddef.h>
 
+#include "common.h"
+
 // UDP RX Engine registers
 #define ACCNET_UDP_RX_RING_BASE            0x00
 #define ACCNET_UDP_RX_RING_SIZE            0x08
@@ -53,5 +55,14 @@ struct accnet_info {
 
 int accnet_open(char *file, struct accnet_info *accnet, bool do_init);
 int accnet_close(struct accnet_info *accnet);
+
+static inline void accnet_setup_connection(struct accnet_info *accnet, struct connection_info *connection) {
+    if (!accnet) 
+        return;
+    reg_write32(accnet->udp_tx_regs, ACCNET_UDP_TX_HDR_IP_SRC,       connection->src_ip);
+	reg_write32(accnet->udp_tx_regs, ACCNET_UDP_TX_HDR_IP_DST,       connection->dst_ip);
+    reg_write16(accnet->udp_tx_regs, ACCNET_UDP_TX_HDR_UDP_SRC_PORT, connection->src_port);
+	reg_write16(accnet->udp_tx_regs, ACCNET_UDP_TX_HDR_UDP_DST_PORT, connection->dst_port);
+}
 
 #endif /* ACCNET_LIB_H */

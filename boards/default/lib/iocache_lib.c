@@ -11,13 +11,14 @@
 #include <limits.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <sys/epoll.h>
+#include <sys/eventfd.h>
 
 #include "iocache_ioctl.h"
 #include "iocache_lib.h"
 #include "common.h"
 
-
-static int do_ioctl(int fd, int index, off_t *offset, size_t *size) {
+static int _iocache_ioctl(int fd, int index, off_t *offset, size_t *size) {
     struct iocache_ioctl_region_info region_info;
     memset(&region_info, 0, sizeof(region_info));
     region_info.argsz = sizeof(region_info);
@@ -50,6 +51,56 @@ static int do_ioctl(int fd, int index, off_t *offset, size_t *size) {
     return 0;
 }
 
+static inline void _iocache_enable_interrupts(struct iocache_info *iocache) {
+    // reg_write8(iocache->regs, IOCACHE_REG_INTMASK,     0x3);
+    reg_write8(iocache->regs, IOCACHE_REG_INTMASK,     0x1); // only enable RX for now
+}
+
+static inline void _iocache_disable_interrupts(struct iocache_info *iocache) {
+    reg_write8(iocache->regs, IOCACHE_REG_INTMASK,     0x0);
+}
+
+static inline void iocache_set_rx_suspended(struct iocache_info *iocache) {
+    int row = 0;
+    reg_write8(iocache->regs, IOCACHE_REG_RX_SUSPENDED(row),     0x1);
+}
+
+static inline void iocache_clear_rx_suspended(struct iocache_info *iocache) {
+    int row = 0;
+    reg_write8(iocache->regs, IOCACHE_REG_RX_SUSPENDED(row),     0x0);
+}
+
+static inline void iocache_set_txcomp_suspended(struct iocache_info *iocache) {
+    int row = 0;
+    reg_write8(iocache->regs, IOCACHE_REG_TXCOMP_SUSPENDED(row),     0x1);
+}
+
+static inline void iocache_clear_txcomp_suspended(struct iocache_info *iocache) {
+    int row = 0;
+    reg_write8(iocache->regs, IOCACHE_REG_TXCOMP_SUSPENDED(row),     0x0);
+}
+
+int iocache_wait_on_rx(struct iocache_info *iocache) { 
+    struct epoll_event out;
+    uint64_t cnt;
+
+    if (iocache_is_rx_available(iocache))
+        return 0;
+
+    iocache_set_rx_suspended(iocache);
+    _iocache_enable_interrupts(iocache);
+    for (;;) {
+        epoll_wait(iocache->ep, &out, 1, -1);
+        if (out.events & EPOLLIN) {
+            read(iocache->efd, &cnt, sizeof(cnt)); 
+            break;
+        }
+    }
+    iocache_clear_rx_suspended(iocache);
+
+    return 0;
+}
+
 int iocache_open(char *file, struct iocache_info *iocache) {
     
     iocache->fd = open(file, O_RDWR | O_SYNC);
@@ -58,25 +109,52 @@ int iocache_open(char *file, struct iocache_info *iocache) {
         return -1;
     }
 
-    if (do_ioctl(iocache->fd, 0, &iocache->regs_offset, &iocache->regs_size) != 0) {
+    if (_iocache_ioctl(iocache->fd, 0, &iocache->regs_offset, &iocache->regs_size) != 0) {
         close(iocache->fd);
         return -1;
     }
+
+    iocache->efd = eventfd(0, EFD_NONBLOCK);
+
+    if (ioctl(iocache->fd, IOCACHE_IOCTL_SET_EVENTFD, &iocache->efd) == -1) {
+        perror("IOCACHE_IOCTL_SET_EVENTFD ioctl failed");
+        close(iocache->efd);
+        close(iocache->fd);
+        return -1;
+    }
+
+    iocache->ep = epoll_create1(0);
+    struct epoll_event ev = {.events = EPOLLIN, .data.fd = iocache->efd};
+    epoll_ctl(iocache->ep, EPOLL_CTL_ADD, iocache->efd, &ev);
 
     /* mmap registers and dma memory */
     iocache->regs = (volatile uint8_t *)mmap(NULL, iocache->regs_size, PROT_READ | PROT_WRITE, MAP_SHARED, iocache->fd, MAP_INDEX(0));
     if (iocache->regs == MAP_FAILED) {
         perror("mmap regs failed");
+        close(iocache->efd);
         close(iocache->fd);
         return -1;
     }
+
+    _iocache_enable_interrupts(iocache);
 
     return 0;
 }
 
 int iocache_close(struct iocache_info *iocache) {
-    munmap((void *) iocache->regs, iocache->regs_size);
-    close(iocache->fd);
+    if (iocache) {
+        int neg1 = -1;
+        ioctl(iocache->fd, IOCACHE_IOCTL_SET_EVENTFD, &neg1); // disarm in driver
 
+        _iocache_disable_interrupts(iocache);
+        iocache_clear_rx_suspended(iocache);
+        iocache_clear_connection(iocache);
+    
+        munmap((void *)(uintptr_t) iocache->regs, iocache->regs_size);
+    
+        close(iocache->ep);
+        close(iocache->efd);
+        close(iocache->fd);
+    }
     return 0;
 }

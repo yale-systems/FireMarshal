@@ -7,6 +7,8 @@
 #include <stdlib.h>
 #include <stddef.h>
 
+#include "common.h"
+
 /* ---- Bus parameters ---- */
 #define IOCACHE_BEAT_BYTES   8UL     /* one TileLink beat = 8 bytes = 64 bits */
 #define IOCACHE_ROW_STRIDE   0x80UL  /* 128B stride per row (16 * BEAT_BYTES) */
@@ -54,9 +56,44 @@ struct iocache_info {
     size_t regs_size;
 
     volatile uint8_t *regs;
+
+    int efd;
+    int ep;
 };
 
 int iocache_open(char *file, struct iocache_info *iocache);
 int iocache_close(struct iocache_info *iocache);
+int iocache_wait_on_rx(struct iocache_info *iocache);
+
+
+static inline void iocache_setup_connection(struct iocache_info *iocache, struct connection_info *entry) {
+    int row = 0;
+    reg_write8 (iocache->regs, IOCACHE_REG_ENABLED(row),     1);
+    reg_write8 (iocache->regs, IOCACHE_REG_PROTOCOL(row),    entry->protocol);
+    reg_write32(iocache->regs, IOCACHE_REG_SRC_IP(row),      entry->src_ip);
+    reg_write16(iocache->regs, IOCACHE_REG_SRC_PORT(row),    entry->src_port);
+    reg_write32(iocache->regs, IOCACHE_REG_DST_IP(row),      entry->dst_ip);
+    reg_write16(iocache->regs, IOCACHE_REG_DST_PORT(row),    entry->dst_port);
+}
+
+static inline void iocache_clear_connection(struct iocache_info *iocache) {
+    int row = 0;
+    reg_write8 (iocache->regs, IOCACHE_REG_ENABLED(row),     0);
+    reg_write8 (iocache->regs, IOCACHE_REG_PROTOCOL(row),    0);
+    reg_write32(iocache->regs, IOCACHE_REG_SRC_IP(row),      0);
+    reg_write16(iocache->regs, IOCACHE_REG_SRC_PORT(row),    0);
+    reg_write32(iocache->regs, IOCACHE_REG_DST_IP(row),      0);
+    reg_write16(iocache->regs, IOCACHE_REG_DST_PORT(row),    0);
+}
+
+static inline bool iocache_is_rx_available(struct iocache_info *iocache) {
+    int row = 0;
+    return reg_read8(iocache->regs, IOCACHE_REG_RX_AVAILABLE(row));
+}
+
+static inline bool iocache_is_txcomp_available(struct iocache_info *iocache) {
+    int row = 0;
+    return reg_read8(iocache->regs, IOCACHE_REG_TXCOMP_AVAILABLE(row));
+}
 
 #endif      // __IOCACHE_LIB_H

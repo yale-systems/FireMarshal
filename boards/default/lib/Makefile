@@ -14,36 +14,44 @@ CFLAGS  ?= -O2 -g -Wall -Wextra -Wformat=2 -Wshadow -Wpointer-arith
 CFLAGS  += -Wcast-qual -Wstrict-prototypes -Wmissing-prototypes
 CPPFLAGS :=
 LDFLAGS  =
+LDLIBS   = -pthread
 
 ifneq ($(strip $(SYSROOT)),)
 CPPFLAGS += --sysroot=$(SYSROOT)
 LDFLAGS  += --sysroot=$(SYSROOT)
 endif
 
-TARGET = mynic
-SRCS   = mynic.c accnet_lib.c iocache_lib.c
-HDRS   = mynic.h common.h accnet_ioctl.h accnet_lib.h iocache_ioctl.h iocache_lib.h
-OBJS   = $(SRCS:.c=.o)
-DEPS   = $(OBJS:.o=.d)
+# ---- apps and sources ----
+APPS := udp_exp interrupt_exp
+
+COMMON_SRCS := accnet_lib.c iocache_lib.c
+SRCS := $(COMMON_SRCS) udp_exp.c interrupt_exp.c
+
+COMMON_OBJS := $(COMMON_SRCS:.c=.o)
+DEPS := $(SRCS:.c=.d)
 
 # ---- rules ----
-all: $(TARGET)
+.PHONY: all clean strip static
 
-$(TARGET): $(OBJS)
-	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^
+all: $(APPS)
 
-%.o: %.c $(HDRS)
+# link each app independently: app := app.o + common objs
+$(APPS): %: %.o $(COMMON_OBJS)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -march=$(ARCH) -mabi=$(ABI) $(LDFLAGS) $^ $(LDLIBS) -o $@
+
+# compile .c -> .o with deps
+%.o: %.c
 	$(CC) $(CPPFLAGS) $(CFLAGS) -march=$(ARCH) -mabi=$(ABI) -MMD -MP -c $< -o $@
 
-strip: $(TARGET)
-	$(STRIP) $<
+strip: $(APPS)
+	$(STRIP) $(APPS)
 
-# Build a static binary (glibc may fail; works best with musl)
+# Build statically (re-run make with -static)
 static:
 	$(MAKE) clean
-	$(MAKE) CFLAGS="$(CFLAGS) -static" LDFLAGS="$(LDFLAGS) -static"
+	$(MAKE) CFLAGS="$(CFLAGS) -static" LDFLAGS="$(LDFLAGS) -static" LDLIBS="$(LDLIBS)"
 
 clean:
-	$(RM) $(OBJS) $(DEPS) $(TARGET)
+	$(RM) $(APPS) $(SRCS:.c=.o) $(DEPS)
 
 -include $(DEPS)

@@ -3,6 +3,7 @@
 
 #include <linux/mm.h>
 #include <asm/set_memory.h>
+#include <linux/eventfd.h>
 
 static int iocache_misc_open(struct inode *inode, struct file *file) {
     struct iocache_device *iocache = container_of(file->private_data, struct iocache_device, misc_dev);
@@ -19,7 +20,17 @@ static int iocache_misc_open(struct inode *inode, struct file *file) {
     return 0;
 }
 
-static int iocache_misc_release(struct inode *inode, struct file *filp) {
+static int iocache_misc_release(struct inode *inode, struct file *filp)
+{
+    struct iocache_device *iocache = filp->private_data;
+    if (iocache) {
+        struct eventfd_ctx *old = NULL;
+        spin_lock(&iocache->ev_lock);
+        old = iocache->ev_ctx;
+        iocache->ev_ctx = NULL;
+        spin_unlock(&iocache->ev_lock);
+        if (old) eventfd_ctx_put(old);
+    }
     return 0;
 }
 
@@ -88,7 +99,35 @@ static long iocache_misc_ioctl(struct file *file, unsigned int cmd, unsigned lon
 			return -EINVAL;
 		}
 		return copy_to_user((void __user *)arg, &info, minsz) ? -EFAULT : 0;
-	}
+	} else if (cmd == IOCACHE_IOCTL_SET_EVENTFD) {
+        int efd;
+        struct eventfd_ctx *ctx, *old = NULL;
+
+        if (copy_from_user(&efd, (void __user *)arg, sizeof(efd)))
+            return -EFAULT;
+
+        /* allow -1 to clear */
+        if (efd == -1) {
+            spin_lock(&iocache->ev_lock);
+            old = iocache->ev_ctx;
+            iocache->ev_ctx = NULL;
+            spin_unlock(&iocache->ev_lock);
+            if (old) eventfd_ctx_put(old);
+            return 0;
+        }
+
+        ctx = eventfd_ctx_fdget(efd);   /* takes a ref */
+        if (IS_ERR(ctx))
+            return PTR_ERR(ctx);
+
+        spin_lock(&iocache->ev_lock);
+        old = iocache->ev_ctx;
+        iocache->ev_ctx = ctx;
+        spin_unlock(&iocache->ev_lock);
+
+        if (old) eventfd_ctx_put(old);
+        return 0;
+    }
 	return -EINVAL;
 }
 
