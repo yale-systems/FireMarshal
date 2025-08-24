@@ -87,6 +87,30 @@ static void _deinit_regs(struct accnet_info *accnet) {
 	reg_write32(accnet->udp_tx_regs, ACCNET_UDP_TX_RING_TAIL, 0);
 }
 
+int accnet_setup_connection(struct accnet_info *accnet, struct connection_info *connection) {
+    if (accnet) {
+        reg_write32(accnet->udp_tx_regs, ACCNET_UDP_TX_HDR_IP_SRC,       connection->src_ip);
+        reg_write32(accnet->udp_tx_regs, ACCNET_UDP_TX_HDR_IP_DST,       connection->dst_ip);
+        reg_write16(accnet->udp_tx_regs, ACCNET_UDP_TX_HDR_UDP_SRC_PORT, connection->src_port);
+        reg_write16(accnet->udp_tx_regs, ACCNET_UDP_TX_HDR_UDP_DST_PORT, connection->dst_port);
+        return 0;
+    }
+    else {
+        return -1;
+    }
+}
+
+int accnet_start_ring(struct accnet_info *accnet) {
+    if (accnet) {
+        reg_write32(accnet->udp_tx_regs, ACCNET_UDP_TX_RING_SIZE, accnet->udp_tx_size);
+        reg_write32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_SIZE, accnet->udp_rx_size);
+        return 0;
+    }
+    else {
+        return -1;
+    }
+}
+
 int accnet_open(char *file, struct accnet_info *accnet, bool do_init) {
     uintptr_t p;
 

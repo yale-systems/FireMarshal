@@ -52,7 +52,7 @@ static const struct file_operations iocache_fops = {
 };
 
 static irqreturn_t iocache_isr_rx(int irq, void *data) {
-	printk(KERN_INFO "RX interrupt received\n");
+	printk(KERN_DEBUG "RX interrupt received\n");
 
 	struct device *dev = data;
 	struct iocache_device *iocache = dev_get_drvdata(dev);
@@ -70,7 +70,7 @@ static irqreturn_t iocache_isr_rx(int irq, void *data) {
 }
 
 static irqreturn_t iocache_isr_txcomp(int irq, void *data) {
-	printk(KERN_INFO "TX interrupt received\n");
+	printk(KERN_DEBUG "TX interrupt received\n");
 	// Nothing for now
 	return IRQ_HANDLED;
 }

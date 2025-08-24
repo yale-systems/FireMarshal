@@ -30,26 +30,51 @@
 #define CLOCK_MONOTONIC 1
 #endif
 
+#define MODE_POLLING "poll"
+#define MODE_BLOCKING "block"
+
 struct timespec timespec_diff(struct timespec *start, struct timespec *end);
-struct timespec test_udp_latency(struct accnet_info *info, uint8_t payload[], uint32_t payload_size, bool debug);
+struct timespec test_udp_latency_block(struct accnet_info *accnet, struct iocache_info *iocache,
+                                        uint8_t payload[], uint32_t payload_size, bool debug);
+struct timespec test_udp_latency_poll(struct accnet_info *accnet, uint8_t payload[], uint32_t payload_size, bool debug);
 
 int main(int argc, char **argv) {
-    char *accnet_dev = "/dev/accnet-misc";
-    struct accnet_info *info = malloc(sizeof(struct accnet_info));
+    char *accnet_filename = "/dev/accnet-misc";
+    char *iocache_filename = "/dev/iocache-misc";
     int n_tests = 64;
     bool debug = false;
     uint32_t payload_size = 32*1024;
     long total = 0;
     double avg = 0;
+    char *src_ip = "10.0.0.2";
+    uint16_t src_port = 1111;
+    char *dst_ip = "10.0.0.1";
+    uint16_t dst_port = 1234;
+    char *mode = MODE_POLLING;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--help") == 0) {
-            printf("Usage: %s [--ntest N] [--debug STR]\n", argv[0]);
+            printf("Usage: %s "
+                "[--ntest N] [--mode {" MODE_POLLING "|" MODE_BLOCKING "}]"
+                "[--payload-size BYTES] "
+                "[--src-ip ADDR] [--src-port PORT] "
+                "[--dst-ip ADDR] [--dst-port PORT] "
+                "[--debug]\n", argv[0]);
             return 0;
         }
         else if (strcmp(argv[i], "--ntest") == 0 && i + 1 < argc) {
             n_tests = atoi(argv[++i]);
             printf("Parsed --ntest = %d\n", n_tests);
+        }
+        else if (strcmp(argv[i], "--mode") == 0 && i + 1 < argc) {
+            mode = argv[++i];
+            if (strcmp(mode, MODE_POLLING) == 0 || strcmp(mode, MODE_BLOCKING) == 0) {
+                printf("Parsed --mode = %s\n", mode);
+            }
+            else {
+                fprintf(stderr, "Invalid mode (options: " MODE_POLLING ", " MODE_BLOCKING ")\n");
+                return -1;
+            }
         }
         else if (strcmp(argv[i], "--payload-size") == 0 && i + 1 < argc) {
             int val = atoi(argv[++i]);
@@ -59,6 +84,22 @@ int main(int argc, char **argv) {
             }
             payload_size = (uint32_t) val;
             printf("Parsed --payload-size = %d\n", payload_size);
+        }
+        else if (strcmp(argv[i], "--src-ip") == 0 && i + 1 < argc) {
+            src_ip = argv[++i];
+            printf("Parsed --src-ip = %s\n", src_ip);
+        }
+        else if (strcmp(argv[i], "--src-port") == 0 && i + 1 < argc) {
+            src_port = (uint16_t) atoi(argv[++i]);
+            printf("Parsed --src-port = %u\n", src_port);
+        }
+        else if (strcmp(argv[i], "--dst-ip") == 0 && i + 1 < argc) {
+            dst_ip = argv[++i];
+            printf("Parsed --dst-ip = %s\n", dst_ip);
+        }
+        else if (strcmp(argv[i], "--dst-port") == 0 && i + 1 < argc) {
+            dst_port = (uint16_t) atoi(argv[++i]);
+            printf("Parsed --dst-port = %u\n", dst_port);
         }
         else if (strcmp(argv[i], "--debug") == 0) {
             debug = true;
@@ -70,7 +111,27 @@ int main(int argc, char **argv) {
         }
     }
 
-    accnet_open(accnet_dev, info, true);
+    struct accnet_info *accnet = malloc(sizeof(struct accnet_info));
+    struct iocache_info *iocache = calloc(1, sizeof(*iocache));
+
+    if (accnet_open(accnet_filename, accnet, true) < 0) {
+        fprintf(stderr, "accnet_open failed\n"); 
+        return 1;
+    }
+    if (iocache_open(iocache_filename, iocache) < 0) {
+        fprintf(stderr, "iocache_open failed\n"); 
+        return 1;
+    }
+
+    struct connection_info *conn = malloc(sizeof(struct connection_info));
+    if (conn_from_strings(conn, 0x11, src_ip, src_port, dst_ip, dst_port) != 0) {
+        fprintf(stderr, "conn_from_strings failed\n"); return 1;
+    }
+
+    accnet_setup_connection(accnet, conn);
+    if (strcmp(mode, MODE_BLOCKING) == 0) {
+        iocache_setup_connection(iocache, conn);
+    }
 
     /* Initializing payload */
     uint8_t payload[payload_size];
@@ -79,26 +140,71 @@ int main(int argc, char **argv) {
     }
 
     /* Init rings */
-    reg_write32(info->udp_tx_regs, ACCNET_UDP_TX_RING_SIZE, info->udp_tx_size);
-    reg_write32(info->udp_rx_regs, ACCNET_UDP_RX_RING_SIZE, info->udp_rx_size);
+    accnet_start_ring(accnet);
 
     /* Run Test */
     for (int i = 0; i < n_tests; i++) {
-        struct timespec diff = test_udp_latency(info, payload, payload_size, debug); 
+        struct timespec diff;
+        if (strcmp(mode, MODE_POLLING) == 0) {
+            diff = test_udp_latency_poll(accnet, payload, payload_size, debug); 
+        }
+        else if (strcmp(mode, MODE_BLOCKING) == 0) {
+            diff = test_udp_latency_block(accnet, iocache, payload, payload_size, debug);
+        }
+
         long time_diff = diff.tv_sec * 1e9 + diff.tv_nsec;
         total += time_diff;
         printf("*** Trial %d: %ld ns\n", i, time_diff);
     }
     avg = (double) total / n_tests;
-    printf("*** Overall:\nAverage delay: %0.2f ns\n", avg);
+    printf("*** Overall (%s):\nAverage delay: %0.2f ns\n", mode, avg);
 
     /* Close Accnet */
-    accnet_close(info);
+    accnet_close(accnet);
+    if (strcmp(mode, MODE_BLOCKING) == 0) {
+        iocache_close(iocache);
+    }
 
     return 0;
 }
 
-struct timespec test_udp_latency(struct accnet_info *info, uint8_t payload[], uint32_t payload_size, bool debug)
+struct timespec test_udp_latency_block(struct accnet_info *accnet, struct iocache_info *iocache,
+uint8_t payload[], uint32_t payload_size, bool debug) 
+{
+    struct timespec before, after;
+
+    /* Preparing to send the payload */
+    uint32_t tx_head, tx_tail, tx_size;
+    tx_head = reg_read32(accnet->udp_tx_regs, ACCNET_UDP_TX_RING_HEAD);
+    tx_tail = reg_read32(accnet->udp_tx_regs, ACCNET_UDP_TX_RING_TAIL);
+    tx_size = reg_read32(accnet->udp_tx_regs, ACCNET_UDP_TX_RING_SIZE);
+
+    memcpy((char *)accnet->udp_tx_buffer + tx_tail, payload, payload_size);
+
+    uint32_t new_tx_tail = (tx_tail + payload_size) % accnet->udp_tx_size;
+
+    /* Preparing to receive the payload */
+    uint32_t rx_head, rx_tail, rx_size;
+    rx_head = reg_read32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_HEAD);
+    rx_size = reg_read32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_SIZE);
+    
+    /* Triggering TX and starting time */
+    clock_gettime(CLOCK_MONOTONIC, &before);
+    reg_write32(accnet->udp_tx_regs, ACCNET_UDP_TX_RING_TAIL, new_tx_tail);
+
+    /* Waiting for RX */
+    iocache_wait_on_rx(iocache);
+    clock_gettime(CLOCK_MONOTONIC, &after);
+
+    /* Updating RX HEAD */
+    rx_tail = reg_read32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_TAIL);
+    int size = (rx_tail > rx_head) ? rx_tail - rx_head : rx_size - (rx_head - rx_tail);
+    reg_write32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_HEAD, rx_tail);
+
+    return timespec_diff(&before, &after);
+}
+
+struct timespec test_udp_latency_poll(struct accnet_info *accnet, uint8_t payload[], uint32_t payload_size, bool debug)
 {
     struct timespec before, after;
 
@@ -106,13 +212,13 @@ struct timespec test_udp_latency(struct accnet_info *info, uint8_t payload[], ui
     uint32_t tx_head, tx_tail, tx_size;
 
     // Read buffer head/tail
-    rx_head = reg_read32(info->udp_rx_regs, ACCNET_UDP_RX_RING_HEAD);
-    rx_tail = reg_read32(info->udp_rx_regs, ACCNET_UDP_RX_RING_TAIL);
-    rx_size = reg_read32(info->udp_rx_regs, ACCNET_UDP_RX_RING_SIZE);
+    rx_head = reg_read32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_HEAD);
+    rx_tail = reg_read32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_TAIL);
+    rx_size = reg_read32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_SIZE);
 
-    tx_head = reg_read32(info->udp_tx_regs, ACCNET_UDP_TX_RING_HEAD);
-    tx_tail = reg_read32(info->udp_tx_regs, ACCNET_UDP_TX_RING_TAIL);
-    tx_size = reg_read32(info->udp_tx_regs, ACCNET_UDP_TX_RING_SIZE);
+    tx_head = reg_read32(accnet->udp_tx_regs, ACCNET_UDP_TX_RING_HEAD);
+    tx_tail = reg_read32(accnet->udp_tx_regs, ACCNET_UDP_TX_RING_TAIL);
+    tx_size = reg_read32(accnet->udp_tx_regs, ACCNET_UDP_TX_RING_SIZE);
 
     if (debug) {
         printf("RX_HEAD: %u, RX_TAIL: %u, RX_SIZE: %u\n", rx_head, rx_tail, rx_size);
@@ -120,29 +226,29 @@ struct timespec test_udp_latency(struct accnet_info *info, uint8_t payload[], ui
     }
 
     if (debug) printf("Copying mem...\n");
-    memcpy((char *)info->udp_tx_buffer + tx_tail, payload, payload_size);
+    memcpy((char *)accnet->udp_tx_buffer + tx_tail, payload, payload_size);
 
-    uint32_t val = (tx_tail + payload_size) % info->udp_tx_size;
+    uint32_t val = (tx_tail + payload_size) % accnet->udp_tx_size;
     if (debug) printf("Begin Test... (new_tail=%u) \n", val);
 
     clock_gettime(CLOCK_MONOTONIC, &before);
 
-    reg_write32(info->udp_tx_regs, ACCNET_UDP_TX_RING_TAIL, val);
-    while (rx_tail != (rx_head + payload_size) % info->udp_rx_size) {
-        rx_tail = reg_read32(info->udp_rx_regs, ACCNET_UDP_RX_RING_TAIL);
+    reg_write32(accnet->udp_tx_regs, ACCNET_UDP_TX_RING_TAIL, val);
+    while (rx_tail != (rx_head + payload_size) % accnet->udp_rx_size) {
+        rx_tail = reg_read32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_TAIL);
         if (debug) {
             printf("Waiting for RX (new rx_tail=%u)...\n", rx_tail);
         }
     }
     clock_gettime(CLOCK_MONOTONIC, &after);
 
-    rx_head = reg_read32(info->udp_rx_regs, ACCNET_UDP_RX_RING_HEAD);
-    rx_size = reg_read32(info->udp_rx_regs, ACCNET_UDP_RX_RING_SIZE);
+    rx_head = reg_read32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_HEAD);
+    rx_size = reg_read32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_SIZE);
     
     // Read buffer head/tail
-    tx_head = reg_read32(info->udp_tx_regs, ACCNET_UDP_TX_RING_HEAD);
-    tx_tail = reg_read32(info->udp_tx_regs, ACCNET_UDP_TX_RING_TAIL);
-    tx_size = reg_read32(info->udp_tx_regs, ACCNET_UDP_TX_RING_SIZE);
+    tx_head = reg_read32(accnet->udp_tx_regs, ACCNET_UDP_TX_RING_HEAD);
+    tx_tail = reg_read32(accnet->udp_tx_regs, ACCNET_UDP_TX_RING_TAIL);
+    tx_size = reg_read32(accnet->udp_tx_regs, ACCNET_UDP_TX_RING_SIZE);
 
     if (debug) {
         printf("RX_HEAD: %u, RX_TAIL: %u, RX_SIZE: %u\n", rx_head, rx_tail, rx_size);
@@ -155,13 +261,13 @@ struct timespec test_udp_latency(struct accnet_info *info, uint8_t payload[], ui
         printf("\n");
         printf("RX Payload:\n");
         for (uint32_t i = rx_head; i < rx_tail; i++) {
-            printf("%02x", ((uint8_t*)info->udp_rx_buffer)[i]);
+            printf("%02x", ((uint8_t*)accnet->udp_rx_buffer)[i]);
         }
         printf("\n");
     }
 
     // Updating RX HEAD
-    reg_write32(info->udp_rx_regs, ACCNET_UDP_RX_RING_HEAD, rx_tail);
+    reg_write32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_HEAD, rx_tail);
 
     return timespec_diff(&before, &after);
 }

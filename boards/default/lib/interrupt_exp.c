@@ -1,3 +1,4 @@
+#define __USE_GNU
 #include <pthread.h>
 #include <stdio.h>
 #include <stdarg.h>
@@ -20,6 +21,10 @@
 #include <sys/select.h>
 #include <stdbool.h>
 #include <time.h>
+#include <stdatomic.h>
+
+#include <sched.h>
+#include <sys/resource.h>
 
 #include "common.h"
 #include "accnet_ioctl.h"
@@ -31,6 +36,22 @@
 #ifndef CLOCK_MONOTONIC
 #define CLOCK_MONOTONIC 1
 #endif
+
+// Lock memory to avoid major page faults during timing critical work
+static void lock_memory_or_warn(void) {
+    if (mlockall(MCL_CURRENT | MCL_FUTURE) != 0) {
+        perror("mlockall (non-fatal)");
+    }
+}
+
+// Set calling thread to SCHED_FIFO with given priority (1..99)
+static int set_rt_fifo_prio(int prio) {
+    struct sched_param sp = { .sched_priority = prio };
+    if (sched_setscheduler(0, SCHED_FIFO, &sp) != 0) {
+        return -errno;
+    }
+    return 0;
+}
 
 static inline int ts_printf(const char *fmt, ...)
 {
@@ -57,11 +78,31 @@ typedef struct {
     struct iocache_info     *iocache;
 } recv_args_t;
 
+static _Atomic int64_t t_start_ns = -1;
+static _Atomic int64_t t_end_ns   = -1;
+
+static inline int64_t timespec_to_ns(const struct timespec *ts) {
+    return (int64_t)ts->tv_sec * 1000000000LL + (int64_t)ts->tv_nsec;
+}
+
+struct timespec timespec_diff(struct timespec *start, struct timespec *end) {
+    struct timespec temp;
+    temp.tv_sec  = end->tv_sec  - start->tv_sec;
+    temp.tv_nsec = end->tv_nsec - start->tv_nsec;
+
+    if (temp.tv_nsec < 0) {
+        temp.tv_sec -= 1;
+        temp.tv_nsec += 1000000000L;
+    }
+    return temp;
+}
+
 static void *send_thread(void *arg) {
     send_args_t *A = (send_args_t *)arg;
     struct accnet_info  *accnet  = A->accnet;
     struct iocache_info *iocache = A->iocache;
     size_t payload_size          = A->payload_size;
+    struct timespec ts;
 
     /* Initializing payload */
     uint8_t payload[payload_size];
@@ -76,9 +117,15 @@ static void *send_thread(void *arg) {
 
     memcpy((char *)accnet->udp_tx_buffer + tx_tail, payload, payload_size);
 
+    __sync_synchronize();
+
     uint32_t val = (tx_tail + payload_size) % accnet->udp_tx_size;
-    ts_printf("[TX-Thread] Begin Send... (new_tail=%u, old_tail=%u, old_head=%u) \n", val, tx_tail, tx_head);
+    // ts_printf("[TX-Thread] Begin Send... (new_tail=%u, old_tail=%u, old_head=%u) \n", val, tx_tail, tx_head);
+    
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+
     reg_write32(accnet->udp_tx_regs, ACCNET_UDP_TX_RING_TAIL, val);
+    t_start_ns = timespec_to_ns(&ts);
     
     return NULL;
 }
@@ -87,30 +134,25 @@ static void *recv_thread(void *arg) {
     recv_args_t *A = (recv_args_t *)arg;
     struct accnet_info  *accnet  = A->accnet;
     struct iocache_info *iocache = A->iocache;
-
+    struct timespec ts;
     int res;
 
     uint32_t rx_head, rx_tail, rx_size;
     rx_size = reg_read32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_SIZE);
+    rx_head = reg_read32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_HEAD);
 
-    ts_printf("[RX-Thread] Starting RX...\n");
-    for (;;) {
-        if (iocache_is_rx_available(iocache)) {
-            rx_head = reg_read32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_HEAD);
-            rx_tail = reg_read32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_TAIL);
-            int size = (rx_tail > rx_head) ? rx_tail - rx_head : rx_size - (rx_head - rx_tail);
-            ts_printf("[RX-Thread] Received %d bytes of data\n", size);
+    // ts_printf("[RX-Thread] Starting RX...\n");
 
-            // Updating RX HEAD
-            reg_write32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_HEAD, rx_tail);
+    res = iocache_wait_on_rx(iocache);
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    t_end_ns = timespec_to_ns(&ts);
 
-            break;
-        }
-        else {
-            ts_printf("[RX-Thread] No data. Waiting...\n");
-            res = iocache_wait_on_rx(iocache);
-        }
-    }
+    rx_tail = reg_read32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_TAIL);
+    int size = (rx_tail > rx_head) ? rx_tail - rx_head : rx_size - (rx_head - rx_tail);
+    // ts_printf("[RX-Thread] Received %d bytes of data\n", size);
+
+    // Updating RX HEAD
+    reg_write32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_HEAD, rx_tail);
     
     return NULL;
 }
@@ -133,11 +175,23 @@ int main(int argc, char **argv) {
             threads      = atoi(argv[++i]);
         }
         else if (!strcmp(argv[i], "--help")) {
-            fprintf(stderr, "Usage: %s [--bytes N] [--payload N] [--threads N]\n", argv[0]);
+            fprintf(stderr, "Usage: %s [--bytes N] [--payload-size N] [--threads N]\n", argv[0]);
             return 0;
         } else {
             fprintf(stderr, "Unknown arg: %s\n", argv[i]);
             return 1;
+        }
+    }
+
+    lock_memory_or_warn();
+
+    // Try for max RT priority (99). If this fails, consider printing why and exiting or falling back.
+    int err = set_rt_fifo_prio(99);
+    if (err) {
+        fprintf(stderr, "sched_setscheduler(SCHED_FIFO,99) failed: %s\n", strerror(-err));
+        // Optional fallback: try a negative nice within SCHED_OTHER
+        if (setpriority(PRIO_PROCESS, 0, -20) != 0) {
+            perror("setpriority");
         }
     }
 
@@ -169,19 +223,26 @@ int main(int argc, char **argv) {
 
     iocache_setup_connection(iocache, conn);
 
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+
+    // Explicitly use the scheduling attributes we set here (don't inherit)
+    pthread_attr_setinheritsched(&attr, PTHREAD_EXPLICIT_SCHED);
+
+    // SCHED_FIFO 99
+    pthread_attr_setschedpolicy(&attr, SCHED_FIFO);
+    struct sched_param sp = { .sched_priority = 99 };
+    pthread_attr_setschedparam(&attr, &sp);
+
     // Spawn receiver thread
     pthread_t *recv_tids    = calloc(1, sizeof(*recv_tids));
     recv_args_t *recv_args  = calloc(1, sizeof(*recv_args));
     recv_args[0].accnet     = accnet;
     recv_args[0].iocache    = iocache;
-    rc = pthread_create(&recv_tids[0], NULL, recv_thread, &recv_args[0]);
-    if (rc) { 
-        errno = rc; 
-        perror("pthread_create"); 
-        return 1; 
-    }
+    rc = pthread_create(&recv_tids[0], &attr, recv_thread, &recv_args[0]);
+    if (rc) { errno = rc; perror("pthread_create recv"); return 1; }
     printf("waiting for rx thread to start...\n");
-    sleep(1);
+    sleep(0.2);
 
     // Spawn sender thread(s)
     if (threads < 1) threads = 1;
@@ -200,13 +261,11 @@ int main(int argc, char **argv) {
         send_args[i].total_bytes   = per_thread + (i == 0 ? remainder : 0);
         send_args[i].payload_size  = payload_size;
         send_args[i].conn          = conn;
-        rc = pthread_create(&send_tids[i], NULL, send_thread, &send_args[i]);
-        if (rc) { 
-            errno = rc; 
-            perror("pthread_create"); 
-            return 1;
-        }
+        rc = pthread_create(&send_tids[i], &attr, send_thread, &send_args[i]);
+        if (rc) { errno = rc; perror("pthread_create send"); return 1; }
     }
+
+    pthread_attr_destroy(&attr);
     
     // Wait for all threads to finish
     for (int i = 0; i < threads; ++i) {
@@ -217,7 +276,12 @@ int main(int argc, char **argv) {
     pthread_join(recv_tids[0], NULL);
     printf("RX threads done\n");
 
-
+    int64_t delta_ns = t_end_ns - t_start_ns;
+    printf("*** One-shot latency:\n");
+    printf("  %ld ns (%.3f us, %.3f ms)\n",
+        (long)delta_ns, delta_ns/1000.0, delta_ns/1e6);
+    printf("\nstart: %ld, end: %ld\n", t_start_ns, t_end_ns);
+    
     free(send_args);
     free(send_tids);
     free(recv_args);
