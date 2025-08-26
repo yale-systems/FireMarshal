@@ -76,7 +76,7 @@ static inline int ipv4_to_str(uint32_t addr_be, char *buf, size_t buflen) {
  * Stored in the low 48 bits (network order: first byte is MSB).
  * Returns 0 on success, -1 on error.
  */
-int mac_str_to_uint64(const char *mac_str, uint64_t *mac_out) {
+static inline int mac_str_to_uint64(const char *mac_str, uint64_t *mac_out) {
     unsigned int bytes[6];
 
     // %x accepts both lowercase and uppercase hex digits
@@ -99,7 +99,7 @@ int mac_str_to_uint64(const char *mac_str, uint64_t *mac_out) {
  * Convert uint64_t MAC (low 48 bits) back to string "aa:bb:cc:dd:ee:ff".
  * buf must be at least 18 bytes long.
  */
-void mac_uint64_to_str(uint64_t mac, char *buf, size_t buflen) {
+static inline void mac_uint64_to_str(uint64_t mac, char *buf, size_t buflen) {
     if (buflen < 18) return;
 
     snprintf(buf, buflen,
@@ -113,7 +113,7 @@ void mac_uint64_to_str(uint64_t mac, char *buf, size_t buflen) {
              mac & 0xFF);
 }
 
-static int conn_from_strings(struct connection_info *c, uint8_t protocol,
+static inline int conn_from_strings(struct connection_info *c, uint8_t protocol,
                                     const char *src_ip_str, uint16_t src_port,
                                     const char *dst_ip_str, uint16_t dst_port)
 {
@@ -131,7 +131,7 @@ static int conn_from_strings(struct connection_info *c, uint8_t protocol,
     return 0;
 }
 
-static int conn_from_strings_mac(struct connection_info *c, uint8_t protocol,
+static inline int conn_from_strings_mac(struct connection_info *c, uint8_t protocol,
                                     const char *src_mac_str, const char *src_ip_str, uint16_t src_port,
                                     const char *dst_mac_str, const char *dst_ip_str, uint16_t dst_port)
 {
