@@ -157,7 +157,7 @@ int iocache_open(char *file, struct iocache_info *iocache) {
         return -1;
     }
 
-    _iocache_enable_interrupts(iocache);
+    _iocache_enable_interrupts_rx(iocache);
 
     return 0;
 }
@@ -167,7 +167,7 @@ int iocache_close(struct iocache_info *iocache) {
         int neg1 = -1;
         ioctl(iocache->fd, IOCACHE_IOCTL_SET_EVENTFD, &neg1); // disarm in driver
 
-        _iocache_disable_interrupts(iocache);
+        _iocache_disable_interrupts_rx(iocache);
         iocache_clear_rx_suspended(iocache);
         iocache_clear_connection(iocache);
     
