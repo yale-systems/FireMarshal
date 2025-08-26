@@ -40,14 +40,12 @@ void print_skb_data(struct sk_buff *skb) {
     printk(KERN_DEBUG "skb->data:\n");
 
     // Print linear data
-#ifdef DEBUG
     int i;
     unsigned int total = 0;
 	unsigned char *data;
     data = skb->data;
     for (i = 0; i < len && total < 128; i++, total++)
         printk(KERN_CONT "%02x ", data[i]);
-#endif
 }
 
 static inline void sk_buff_cq_init(struct sk_buff_cq *cq)
@@ -162,7 +160,9 @@ static inline void post_send(
 
 	sk_buff_cq_push(&nic->send_cq, skb);
 
+#ifdef DEBUG
 	printk(KERN_DEBUG "AccNet: tx addr=%lx len=%llu\n", addr, len);
+#endif
 }
 
 static inline void post_recv(
@@ -224,25 +224,35 @@ static int complete_recv(struct net_device *ndev, int budget)
 	uint64_t res;
 	uintptr_t addr;
 	
+#ifdef DEBUG
 	printk(KERN_DEBUG "AccNet: complete_recv called with budget %d\n", budget);
+#endif
 	n = recv_comp_avail(nic);
 	if (budget < n) {
 		n = budget;
 	}
+#ifdef DEBUG
 	printk(KERN_DEBUG "AccNet: Completing %d receive requests\n", n);
+#endif
 
 	for (i = 0; i < n; i++) {
 		res = ioread64(nic->iomem_rx + ACCNET_RX_COMP_LOG);
 		len = res & 0xffff;
 		addr = (res >> 16) & 0xffffffffffffL;
+#ifdef DEBUG
 		dev_dbg(nic->dev, "Received packet at phys_addr=%lx, virt_addr=%p, len=%d\n", addr, phys_to_virt(addr), len);
+#endif
 
 		dma_rmb();                 // make NIC's DMA writes visible/ordered
 		skb = sk_buff_cq_pop(&nic->recv_cq);
+#ifdef DEBUG
 		dev_dbg(nic->dev, "skb from recv_cq virt_addr=%p, phys_addr=%lx\n", skb->data, virt_to_phys(skb->data));
+#endif
 
 		skb_put(skb, len);
+#ifdef DEBUG
 		print_skb_data(skb);
+#endif
 
 #ifdef CONFIG_ACCNET_CHECKSUM
 		csum_res = ioread8(nic->iomem + ACCNET_RXCSUM_RES);
@@ -257,8 +267,9 @@ static int complete_recv(struct net_device *ndev, int budget)
 		ndev->stats.rx_bytes += len;
 		netif_receive_skb(skb);
 
-		printk(KERN_DEBUG "AccNet: rx addr=%p, len=%d\n",
-				skb->data, len);
+#ifdef DEBUG
+		printk(KERN_DEBUG "AccNet: rx addr=%p, len=%d\n", skb->data, len);
+#endif
 	}
 
 	return n;
@@ -290,7 +301,9 @@ static inline void accnet_schedule(struct accnet_device *nic)
 
 static irqreturn_t accnet_tx_isr(int irq, void *data)
 {
+#ifdef DEBUG
 	printk(KERN_DEBUG "TX interrupt received\n");
+#endif
 	struct net_device *ndev = data;
 	struct accnet_device *nic = netdev_priv(ndev);
 
@@ -309,7 +322,9 @@ static irqreturn_t accnet_tx_isr(int irq, void *data)
 
 static irqreturn_t accnet_rx_isr(int irq, void *data)
 {
+#ifdef DEBUG
 	printk(KERN_DEBUG "RX interrupt received\n");
+#endif
 	struct net_device *ndev = data;
 	struct accnet_device *nic = netdev_priv(ndev);
 
@@ -328,7 +343,9 @@ static irqreturn_t accnet_rx_isr(int irq, void *data)
 
 static int accnet_poll(struct napi_struct *napi, int budget)
 {
+#ifdef DEBUG
 	printk(KERN_DEBUG "NAPI poll called with budget %d\n", budget);
+#endif
 	struct accnet_device *nic;
 	struct net_device *ndev;
 	int work_done;
@@ -556,7 +573,9 @@ static int accnet_start_xmit(struct sk_buff *skb, struct net_device *ndev)
 	unsigned long flags;
 
 	dev_dbg(nic->dev, "Transmitting packet of length %d\n", skb->len);
+#ifdef DEBUG
 	print_skb_data(skb);
+#endif
 
 	spin_lock_irqsave(&nic->tx_lock, flags);
 
