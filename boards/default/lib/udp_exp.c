@@ -47,8 +47,10 @@ int main(int argc, char **argv) {
     long total = 0;
     double avg = 0;
     char *src_ip = "10.0.0.2";
+    char *src_mac = "0c:42:a1:a8:2d:e6";
     uint16_t src_port = 1111;
     char *dst_ip = "10.0.0.1";
+    char *dst_mac = "00:0a:35:06:4d:e2";
     uint16_t dst_port = 1234;
     char *mode = MODE_POLLING;
 
@@ -85,6 +87,10 @@ int main(int argc, char **argv) {
             payload_size = (uint32_t) val;
             printf("Parsed --payload-size = %d\n", payload_size);
         }
+        else if (strcmp(argv[i], "--src-mac") == 0 && i + 1 < argc) {
+            src_mac = argv[++i];
+            printf("Parsed --src-mac = %s\n", src_mac);
+        }
         else if (strcmp(argv[i], "--src-ip") == 0 && i + 1 < argc) {
             src_ip = argv[++i];
             printf("Parsed --src-ip = %s\n", src_ip);
@@ -92,6 +98,10 @@ int main(int argc, char **argv) {
         else if (strcmp(argv[i], "--src-port") == 0 && i + 1 < argc) {
             src_port = (uint16_t) atoi(argv[++i]);
             printf("Parsed --src-port = %u\n", src_port);
+        }
+        else if (strcmp(argv[i], "--dst-mac") == 0 && i + 1 < argc) {
+            dst_mac = argv[++i];
+            printf("Parsed --dst-mac = %s\n", dst_mac);
         }
         else if (strcmp(argv[i], "--dst-ip") == 0 && i + 1 < argc) {
             dst_ip = argv[++i];
@@ -124,7 +134,7 @@ int main(int argc, char **argv) {
     }
 
     struct connection_info *conn = malloc(sizeof(struct connection_info));
-    if (conn_from_strings(conn, 0x11, src_ip, src_port, dst_ip, dst_port) != 0) {
+    if (conn_from_strings_mac(conn, 0x11, src_mac, src_ip, src_port, dst_mac, dst_ip, dst_port) != 0) {
         fprintf(stderr, "conn_from_strings failed\n"); return 1;
     }
 
