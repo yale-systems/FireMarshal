@@ -111,20 +111,18 @@ static void *send_thread(void *arg) {
     }
 
     uint32_t tx_head, tx_tail, tx_size;
-    tx_head = reg_read32(accnet->udp_tx_regs, ACCNET_UDP_TX_RING_HEAD);
-    tx_tail = reg_read32(accnet->udp_tx_regs, ACCNET_UDP_TX_RING_TAIL);
-    tx_size = reg_read32(accnet->udp_tx_regs, ACCNET_UDP_TX_RING_SIZE);
+    tx_head = accnet_get_tx_head(accnet); 
+    tx_tail = accnet_get_tx_tail(accnet); 
+    tx_size = accnet_get_tx_size(accnet); 
 
     memcpy((char *)accnet->udp_tx_buffer + tx_tail, payload, payload_size);
-
     __sync_synchronize();
 
     uint32_t val = (tx_tail + payload_size) % accnet->udp_tx_size;
-    // ts_printf("[TX-Thread] Begin Send... (new_tail=%u, old_tail=%u, old_head=%u) \n", val, tx_tail, tx_head);
     
     clock_gettime(CLOCK_MONOTONIC, &ts);
 
-    reg_write32(accnet->udp_tx_regs, ACCNET_UDP_TX_RING_TAIL, val);
+    accnet_set_tx_tail(accnet, val);
     t_start_ns = timespec_to_ns(&ts);
     
     return NULL;
@@ -138,21 +136,18 @@ static void *recv_thread(void *arg) {
     int res;
 
     uint32_t rx_head, rx_tail, rx_size;
-    rx_size = reg_read32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_SIZE);
-    rx_head = reg_read32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_HEAD);
-
-    // ts_printf("[RX-Thread] Starting RX...\n");
+    rx_size = accnet_get_rx_size(accnet);
+    rx_head = accnet_get_rx_head(accnet);
 
     res = iocache_wait_on_rx(iocache);
     clock_gettime(CLOCK_MONOTONIC, &ts);
     t_end_ns = timespec_to_ns(&ts);
 
-    rx_tail = reg_read32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_TAIL);
+    rx_tail = accnet_get_rx_tail(accnet);
     int size = (rx_tail > rx_head) ? rx_tail - rx_head : rx_size - (rx_head - rx_tail);
-    // ts_printf("[RX-Thread] Received %d bytes of data\n", size);
 
     // Updating RX HEAD
-    reg_write32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_HEAD, rx_tail);
+    accnet_set_rx_head(accnet, rx_tail);
     
     return NULL;
 }
@@ -213,12 +208,12 @@ int main(int argc, char **argv) {
     }
     
     /* Init rings */
-    reg_write32(accnet->udp_tx_regs, ACCNET_UDP_TX_RING_SIZE, accnet->udp_tx_size);
-    reg_write32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_SIZE, accnet->udp_rx_size);
+    accnet_start_ring(accnet);
 
     // Configure a connection in IOCache (adjust to your needs)
     if (conn_from_strings(conn, 0x11, "10.0.0.1", 1234, "10.0.0.2", 1111) != 0) {
-        fprintf(stderr, "conn_from_strings failed\n"); return 1;
+        fprintf(stderr, "conn_from_strings failed\n"); 
+        return 1;
     }
 
     iocache_setup_connection(iocache, conn);

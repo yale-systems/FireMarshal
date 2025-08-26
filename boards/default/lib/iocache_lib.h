@@ -32,7 +32,8 @@
     (IOCACHE_TABLE_BASE + (row) * IOCACHE_ROW_STRIDE + (off))
 
 /* ---- Global registers ---- */
-#define IOCACHE_REG_INTMASK  0x00UL
+#define IOCACHE_REG_INTMASK_RX  		0x00UL
+#define IOCACHE_REG_INTMASK_TXCOMP  	0x08UL
 
 /* ---- Convenience macros ---- */
 #define IOCACHE_REG_ENABLED(row)            IOCACHE_REG((row), IOCACHE_ENABLED_OFF)
@@ -64,7 +65,7 @@ struct iocache_info {
 int iocache_open(char *file, struct iocache_info *iocache);
 int iocache_close(struct iocache_info *iocache);
 int iocache_wait_on_rx(struct iocache_info *iocache);
-
+int iocache_wait_on_txcomp(struct iocache_info *iocache);
 
 static inline void iocache_setup_connection(struct iocache_info *iocache, struct connection_info *entry) {
     int row = 0;

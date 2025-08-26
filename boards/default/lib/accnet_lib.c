@@ -111,6 +111,24 @@ int accnet_start_ring(struct accnet_info *accnet) {
     }
 }
 
+size_t accnet_send(struct accnet_info *accnet, void *buffer, size_t len) {
+    uint32_t tx_head, tx_tail, tx_size;
+
+    tx_head = accnet_get_tx_head(accnet); 
+    tx_tail = accnet_get_tx_tail(accnet); 
+    tx_size = accnet_get_tx_size(accnet); 
+
+    uint32_t avail = (tx_tail > tx_head) ? tx_tail - tx_head : tx_size - (tx_head - tx_size);
+    uint32_t val = (tx_tail + len) % accnet->udp_tx_size;
+
+    memcpy((char *)accnet->udp_tx_buffer + tx_tail, buffer, len);
+    __sync_synchronize();
+
+    accnet_set_tx_tail(accnet, val);
+
+    return len;
+}
+
 int accnet_open(char *file, struct accnet_info *accnet, bool do_init) {
     uintptr_t p;
 

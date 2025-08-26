@@ -51,13 +51,20 @@ static int _iocache_ioctl(int fd, int index, off_t *offset, size_t *size) {
     return 0;
 }
 
-static inline void _iocache_enable_interrupts(struct iocache_info *iocache) {
-    // reg_write8(iocache->regs, IOCACHE_REG_INTMASK,     0x3);
-    reg_write8(iocache->regs, IOCACHE_REG_INTMASK,     0x1); // only enable RX for now
+static inline void _iocache_enable_interrupts_rx(struct iocache_info *iocache) {
+    reg_write8(iocache->regs, IOCACHE_REG_INTMASK_RX,     0x1);
 }
 
-static inline void _iocache_disable_interrupts(struct iocache_info *iocache) {
-    reg_write8(iocache->regs, IOCACHE_REG_INTMASK,     0x0);
+static inline void _iocache_disable_interrupts_rx(struct iocache_info *iocache) {
+    reg_write8(iocache->regs, IOCACHE_REG_INTMASK_RX,     0x0);
+}
+
+static inline void _iocache_enable_interrupts_txcomp(struct iocache_info *iocache) {
+    reg_write8(iocache->regs, IOCACHE_REG_INTMASK_TXCOMP,     0x1);
+}
+
+static inline void _iocache_disable_interrupts_txcomp(struct iocache_info *iocache) {
+    reg_write8(iocache->regs, IOCACHE_REG_INTMASK_TXCOMP,     0x0);
 }
 
 static inline void iocache_set_rx_suspended(struct iocache_info *iocache) {
@@ -88,7 +95,7 @@ int iocache_wait_on_rx(struct iocache_info *iocache) {
         return 0;
 
     iocache_set_rx_suspended(iocache);
-    _iocache_enable_interrupts(iocache);
+    _iocache_enable_interrupts_rx(iocache);
     for (;;) {
         epoll_wait(iocache->ep, &out, 1, -1);
         if (out.events & EPOLLIN) {
@@ -103,6 +110,17 @@ int iocache_wait_on_rx(struct iocache_info *iocache) {
 
     return 0;
 }
+
+int iocache_wait_on_txcomp(struct iocache_info *iocache) {
+    struct epoll_event out;
+    uint64_t cnt;
+
+    if (iocache_is_txcomp_available(iocache))
+        return 0;
+
+    return 0;
+}
+
 
 int iocache_open(char *file, struct iocache_info *iocache) {
     

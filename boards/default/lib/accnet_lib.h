@@ -37,6 +37,12 @@
 #define ACCNET_CTRL_FILTER_PORT            0x08
 #define ACCNET_CTRL_FILTER_IP              0x10
 
+struct ring_info {
+    uint32_t rx_head, rx_tail, rx_size;
+    uint32_t tx_head, tx_tail, tx_size;
+};
+
+
 struct accnet_info {
     int fd;
     size_t ALIGN;
@@ -51,6 +57,8 @@ struct accnet_info {
 
     size_t udp_tx_size;
     size_t udp_rx_size;
+
+    struct ring_info ring;
 };
 
 int accnet_open(char *file, struct accnet_info *accnet, bool do_init);
@@ -58,6 +66,8 @@ int accnet_close(struct accnet_info *accnet);
 
 int accnet_start_ring(struct accnet_info *accnet);
 int accnet_setup_connection(struct accnet_info *accnet, struct connection_info *connection);
+
+size_t accnet_send(struct accnet_info *accnet, void *buffer, size_t len);
 
 static inline void accnet_set_rx_head(struct accnet_info *accnet, uint32_t val) 
 {

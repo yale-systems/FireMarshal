@@ -31,16 +31,24 @@ MODULE_DESCRIPTION("iocache driver");
 MODULE_AUTHOR("Amirmohammad Nazari");
 MODULE_LICENSE("Dual MIT/GPL");
 
-static inline void set_intmask(struct iocache_device *iocache, uint32_t mask)
+static inline void set_intmask_rx(struct iocache_device *iocache, uint32_t mask)
 {
-	atomic_t *mem = iocache->iomem + IOCACHE_REG_INTMASK;
-	atomic_fetch_or(mask, mem);
+	iowrite8(0x1, REG(iocache->iomem, IOCACHE_REG_INTMASK_RX));
 }
 
-static inline void clear_intmask(struct iocache_device *iocache, uint32_t mask)
+static inline void clear_intmask_rx(struct iocache_device *iocache, uint32_t mask)
 {
-	atomic_t *mem = iocache->iomem + IOCACHE_REG_INTMASK;
-	atomic_fetch_and(~mask, mem);
+	iowrite8(0x0, REG(iocache->iomem, IOCACHE_REG_INTMASK_RX));
+}
+
+static inline void set_intmask_txcomp(struct iocache_device *iocache, uint32_t mask)
+{
+	iowrite8(0x1, REG(iocache->iomem, IOCACHE_REG_INTMASK_TXCOMP));
+}
+
+static inline void clear_intmask_txcomp(struct iocache_device *iocache, uint32_t mask)
+{
+	iowrite8(0x0, REG(iocache->iomem, IOCACHE_REG_INTMASK_TXCOMP));
 }
 
 static const struct file_operations iocache_fops = {
@@ -58,7 +66,7 @@ static irqreturn_t iocache_isr_rx(int irq, void *data) {
 	struct iocache_device *iocache = dev_get_drvdata(dev);
     struct eventfd_ctx *ctx = NULL;
 
-	clear_intmask(iocache, IOCACHE_INTMASK_RX);
+	clear_intmask_rx(iocache, IOCACHE_INTMASK_RX);
 
     spin_lock(&iocache->ev_lock);
     ctx = iocache->ev_ctx;

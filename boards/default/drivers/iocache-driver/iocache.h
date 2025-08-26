@@ -23,6 +23,7 @@
 #include <linux/miscdevice.h> 
 
 #include <linux/io.h>   /* iowriteXX */
+#define REG(base, off) ((void __iomem *)((u8 __iomem *)(base) + (off)))
 
 #define IOCACHE_NAME "iocache"
 
@@ -49,7 +50,8 @@
     (IOCACHE_TABLE_BASE + (row) * IOCACHE_ROW_STRIDE + (off))
 
 /* ---- Global registers ---- */
-#define IOCACHE_REG_INTMASK  0x00UL
+#define IOCACHE_REG_INTMASK_RX  		0x00UL
+#define IOCACHE_REG_INTMASK_TXCOMP  	0x08UL
 
 /* ---- Convenience macros ---- */
 #define IOCACHE_REG_ENABLED(row)            IOCACHE_REG((row), IOCACHE_ENABLED_OFF)
