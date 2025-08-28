@@ -127,6 +127,12 @@ static long iocache_misc_ioctl(struct file *file, unsigned int cmd, unsigned lon
 
         if (old) eventfd_ctx_put(old);
         return 0;
+    } else if (cmd == IOCACHE_IOCTL_GET_LAST_IRQ_NS) {
+		u64 val = iocache->last_irq_ns;
+		
+        if (copy_to_user((void __user *)arg, &val, sizeof(val)))
+            return -EFAULT;
+        return 0;
     }
 	return -EINVAL;
 }
