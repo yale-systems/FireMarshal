@@ -155,6 +155,7 @@ int main(int argc, char **argv) {
     /* Run Test */
     for (int i = 0; i < n_tests; i++) {
         struct timespec diff;
+
         if (strcmp(mode, MODE_POLLING) == 0) {
             diff = test_udp_latency_poll(accnet, payload, payload_size, debug); 
         }
@@ -188,6 +189,7 @@ struct timespec test_udp_latency_block(struct accnet_info *accnet, struct iocach
 uint8_t payload[], uint32_t payload_size, bool debug) 
 {
     struct timespec before, after;
+    __u64 last_irq_ns = 0;
 
     /* Preparing to send the payload */
     uint32_t tx_head, tx_tail, tx_size;
@@ -216,6 +218,24 @@ uint8_t payload[], uint32_t payload_size, bool debug)
     rx_tail = reg_read32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_TAIL);
     int size = (rx_tail > rx_head) ? rx_tail - rx_head : rx_size - (rx_head - rx_tail);
     reg_write32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_HEAD, rx_tail);
+
+
+    // IRQ timestamp
+    if (iocache_get_last_irq_ns(iocache, &last_irq_ns) == 0) {
+        struct timespec irq_ts, diff1, diff2;
+        irq_ts.tv_sec  = last_irq_ns / 1000000000ULL;
+        irq_ts.tv_nsec = last_irq_ns % 1000000000ULL;
+        diff1 = timespec_diff(&before, &irq_ts);
+        diff2 = timespec_diff(&irq_ts, &after);
+
+        printf("Before: %lld.%09ld\n", (long long)before.tv_sec, before.tv_nsec);
+        printf("IRQ   : %lld.%09ld, (IRQ-Before:   %lld.%09ld)=\n", 
+            (long long)irq_ts.tv_sec, irq_ts.tv_nsec, (long long)diff1.tv_sec, diff1.tv_nsec);
+        printf("After : %lld.%09ld, (After-IRQ: %lld.%09ld)=\n", 
+            (long long)after.tv_sec, after.tv_nsec, (long long)diff2.tv_sec, diff2.tv_nsec);
+    } else {
+        printf("iocache_get_last_irq_ns failed\n");
+    }
 
     return timespec_diff(&before, &after);
 }

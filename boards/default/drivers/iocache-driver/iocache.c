@@ -68,11 +68,13 @@ static irqreturn_t iocache_isr_rx(int irq, void *data) {
 
 	clear_intmask_rx(iocache, IOCACHE_INTMASK_RX);
 
-    spin_lock(&iocache->ev_lock);
+	// save timestamp
+	u64 now = ktime_get_mono_fast_ns();   // OK in hard IRQ
+    iocache->last_irq_ns = now;
+
     ctx = iocache->ev_ctx;
     if (ctx)
         eventfd_signal(ctx, 1);   /* safe to call in hard IRQ */
-    spin_unlock(&iocache->ev_lock);
 
     return IRQ_HANDLED;
 }
@@ -157,8 +159,9 @@ static int iocache_probe(struct platform_device *pdev) {
 		return -ENODEV;
 
 	iocache = devm_kzalloc(dev, sizeof(*iocache), GFP_KERNEL);
-    if (!iocache)
-        return -ENOMEM;
+    if (!iocache) {
+		return -ENOMEM;
+	}
 
 	platform_set_drvdata(pdev, iocache);
 	dev_set_drvdata(dev, iocache);
@@ -172,6 +175,7 @@ static int iocache_probe(struct platform_device *pdev) {
 		return ret;
 
 	spin_lock_init(&iocache->ev_lock);
+	u64_stats_init(&iocache->syncp);
 
 	/* Register the misc device */
     iocache->misc_dev.minor = MISC_DYNAMIC_MINOR;
@@ -182,6 +186,8 @@ static int iocache_probe(struct platform_device *pdev) {
 	ret = misc_register(&iocache->misc_dev);
 	if (ret) {
 		dev_err(dev, "Failed to register misc device");
+		free_irq(iocache->rx_irq, dev);
+		free_irq(iocache->txcomp_irq, dev);
 		return ret;
 	}
 	else {
@@ -199,6 +205,9 @@ static int iocache_remove(struct platform_device *pdev) {
 		dev_warn(dev, "Could not find misc device to deregister");
         return 0;
 	}
+
+	free_irq(iocache->rx_irq, dev);
+	free_irq(iocache->txcomp_irq, dev);
 
     misc_deregister(&iocache->misc_dev);
 

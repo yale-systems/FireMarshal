@@ -22,6 +22,11 @@
 #include <linux/dma-mapping.h>
 #include <linux/miscdevice.h> 
 
+#include <linux/u64_stats_sync.h>
+#include <linux/ktime.h>
+#include <linux/fs.h>
+#include <linux/uaccess.h>
+
 #include <linux/io.h>   /* iowriteXX */
 #define REG(base, off) ((void __iomem *)((u8 __iomem *)(base) + (off)))
 
@@ -88,6 +93,9 @@ struct iocache_device {
     spinlock_t          ev_lock; /* protects ev_ctx */
 	
 	unsigned long magic;
+
+	struct u64_stats_sync syncp;
+    u64 last_irq_ns;
 };
 
 static int iocache_misc_open(struct inode *inode, struct file *filp);

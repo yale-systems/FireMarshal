@@ -121,6 +121,14 @@ int iocache_wait_on_txcomp(struct iocache_info *iocache) {
     return 0;
 }
 
+int iocache_get_last_irq_ns(struct iocache_info *iocache, __u64 *ns) {
+    if (ioctl(iocache->fd, IOCACHE_IOCTL_GET_LAST_IRQ_NS, ns) == -1) {
+        perror("IOCACHE_IOCTL_GET_LAST_IRQ_NS ioctl failed");
+        return -1;
+    }
+    return 0;
+}
+
 
 int iocache_open(char *file, struct iocache_info *iocache) {
     

@@ -29,7 +29,9 @@ struct iocache_ioctl_region_info {
 };
 #define IOCACHE_IOCTL_GET_REGION_INFO _IO(IOCACHE_IOCTL_TYPE, IOCACHE_IOCTL_BASE + 2)
 
-/* NEW: userspace passes an int (eventfd) */
+/* userspace passes an int (eventfd) */
 #define IOCACHE_IOCTL_SET_EVENTFD _IOW(IOCACHE_IOCTL_TYPE, IOCACHE_IOCTL_BASE + 3, int)
+
+#define IOCACHE_IOCTL_GET_LAST_IRQ_NS _IOR(IOCACHE_IOCTL_TYPE, IOCACHE_IOCTL_BASE + 4, __u64)
 
 #endif /* __IOCACHE_IOCTL_H */
