@@ -799,18 +799,47 @@ fail_dma_alloc_tx:
 
 static int accnet_remove(struct platform_device *pdev)
 {
-	struct net_device *ndev;
-	struct accnet_device *nic;
+    struct net_device *ndev = dev_get_drvdata(&pdev->dev);
+    struct accnet_device *nic;
+    if (!ndev)
+        return 0;
 
-	ndev = platform_get_drvdata(pdev);
-	nic = netdev_priv(ndev);
-	netif_napi_del(&nic->napi);
-	dma_free_coherent(nic->dev, nic->dma_region_len_udp_tx + (ALIGN_BYTES - 1), nic->dma_region_udp_tx, nic->dma_region_addr_udp_tx);
-	dma_free_coherent(nic->dev, nic->dma_region_len_udp_rx + (ALIGN_BYTES - 1), nic->dma_region_udp_rx, nic->dma_region_addr_udp_rx);
-	misc_register(&nic->misc_dev);
-	unregister_netdev(ndev);
+    nic = netdev_priv(ndev);
 
-	return 0;
+    /* stop userspace entry points first */
+    misc_deregister(&nic->misc_dev);
+
+    /* bring down netdev */
+    if (netif_running(ndev))
+        dev_close(ndev);                   /* calls ndo_stop */
+    unregister_netdev(ndev);               /* safe if not running */
+
+    /* tear down NAPI hook */
+    netif_napi_del(&nic->napi);
+
+    /* defensively mask device interrupts */
+    clear_intmask(nic, ACCNET_INTMASK_BOTH);
+
+    /* free coherent DMA buffers we allocated in probe */
+    if (nic->dma_region_udp_tx)
+        dma_free_coherent(nic->dev,
+                          nic->dma_region_len_udp_tx + (ALIGN_BYTES - 1),
+                          nic->dma_region_udp_tx,
+                          nic->dma_region_addr_udp_tx);
+
+    if (nic->dma_region_udp_rx)
+        dma_free_coherent(nic->dev,
+                          nic->dma_region_len_udp_rx + (ALIGN_BYTES - 1),
+                          nic->dma_region_udp_rx,
+                          nic->dma_region_addr_udp_rx);
+
+    /* release DT irq mappings created with irq_of_parse_and_map */
+    if (nic->tx_irq)
+        irq_dispose_mapping(nic->tx_irq);
+    if (nic->rx_irq)
+        irq_dispose_mapping(nic->rx_irq);
+
+    return 0;
 }
 
 static struct of_device_id accnet_of_match[] = {
