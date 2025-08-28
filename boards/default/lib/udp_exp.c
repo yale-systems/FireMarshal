@@ -44,11 +44,11 @@ int main(int argc, char **argv) {
     int n_tests = 64;
     bool debug = false;
     uint32_t payload_size = 32*1024;
-    long total = 0;
-    double avg = 0;
     char *src_ip = "10.0.0.2";
+    char *src_mac = "0c:42:a1:a8:2d:e6";
     uint16_t src_port = 1111;
     char *dst_ip = "10.0.0.1";
+    char *dst_mac = "00:0a:35:06:4d:e2";
     uint16_t dst_port = 1234;
     char *mode = MODE_POLLING;
 
@@ -85,6 +85,10 @@ int main(int argc, char **argv) {
             payload_size = (uint32_t) val;
             printf("Parsed --payload-size = %d\n", payload_size);
         }
+        else if (strcmp(argv[i], "--src-mac") == 0 && i + 1 < argc) {
+            src_mac = argv[++i];
+            printf("Parsed --src-mac = %s\n", src_mac);
+        }
         else if (strcmp(argv[i], "--src-ip") == 0 && i + 1 < argc) {
             src_ip = argv[++i];
             printf("Parsed --src-ip = %s\n", src_ip);
@@ -92,6 +96,10 @@ int main(int argc, char **argv) {
         else if (strcmp(argv[i], "--src-port") == 0 && i + 1 < argc) {
             src_port = (uint16_t) atoi(argv[++i]);
             printf("Parsed --src-port = %u\n", src_port);
+        }
+        else if (strcmp(argv[i], "--dst-mac") == 0 && i + 1 < argc) {
+            dst_mac = argv[++i];
+            printf("Parsed --dst-mac = %s\n", dst_mac);
         }
         else if (strcmp(argv[i], "--dst-ip") == 0 && i + 1 < argc) {
             dst_ip = argv[++i];
@@ -124,7 +132,7 @@ int main(int argc, char **argv) {
     }
 
     struct connection_info *conn = malloc(sizeof(struct connection_info));
-    if (conn_from_strings(conn, 0x11, src_ip, src_port, dst_ip, dst_port) != 0) {
+    if (conn_from_strings_mac(conn, 0x11, src_mac, src_ip, src_port, dst_mac, dst_ip, dst_port) != 0) {
         fprintf(stderr, "conn_from_strings failed\n"); return 1;
     }
 
@@ -142,6 +150,8 @@ int main(int argc, char **argv) {
     /* Init rings */
     accnet_start_ring(accnet);
 
+    long long sum_ns = 0, min_ns = 0, max_ns = 0;
+
     /* Run Test */
     for (int i = 0; i < n_tests; i++) {
         struct timespec diff;
@@ -152,13 +162,19 @@ int main(int argc, char **argv) {
         else if (strcmp(mode, MODE_BLOCKING) == 0) {
             diff = test_udp_latency_block(accnet, iocache, payload, payload_size, debug);
         }
-
-        long time_diff = diff.tv_sec * 1e9 + diff.tv_nsec;
-        total += time_diff;
-        printf("*** Trial %d: %ld ns\n", i, time_diff);
+        long long rtt_ns = diff.tv_sec * 1e9 + diff.tv_nsec;
+        if (i == 0) {
+            min_ns = max_ns = rtt_ns;
+        } else {
+            if (rtt_ns < min_ns) min_ns = rtt_ns;
+            if (rtt_ns > max_ns) max_ns = rtt_ns;
+        }
+        sum_ns += rtt_ns;
+        printf("iter=%d rtt=%.3f us\n", i, rtt_ns / 1e3);
     }
-    avg = (double) total / n_tests;
-    printf("*** Overall (%s):\nAverage delay: %0.2f ns\n", mode, avg);
+    double avg_us = (sum_ns / (double)n_tests) / 1e3;
+    printf("\nResults (%s): recv=%d  min=%.3f us  avg=%.3f us  max=%.3f us\n",
+                mode, n_tests, min_ns/1e3, avg_us, max_ns/1e3);
 
     /* Close Accnet */
     accnet_close(accnet);

@@ -93,6 +93,12 @@ int accnet_setup_connection(struct accnet_info *accnet, struct connection_info *
         reg_write32(accnet->udp_tx_regs, ACCNET_UDP_TX_HDR_IP_DST,       connection->dst_ip);
         reg_write16(accnet->udp_tx_regs, ACCNET_UDP_TX_HDR_UDP_SRC_PORT, connection->src_port);
         reg_write16(accnet->udp_tx_regs, ACCNET_UDP_TX_HDR_UDP_DST_PORT, connection->dst_port);
+        if (connection->src_mac) {
+            reg_write64(accnet->udp_tx_regs, ACCNET_UDP_TX_HDR_MAC_SRC, connection->src_mac);
+        }
+        if (connection->dst_mac) {
+            reg_write64(accnet->udp_tx_regs, ACCNET_UDP_TX_HDR_MAC_DST, connection->dst_mac);
+        }
         return 0;
     }
     else {
