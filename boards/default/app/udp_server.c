@@ -46,11 +46,11 @@ int main() {
             continue;
         }
 
-        printf("Received %zd bytes\n", n);
+        // printf("Received %zd bytes\n", n);
         if (n > 0) {
-            printf("First byte before: %u\n", buffer[0]);
+            // printf("First byte before: %u\n", buffer[0]);
             buffer[0] = (buffer[0] + 1) & 0xFF;  // increment first byte
-            printf("First byte after: %u\n", buffer[0]);
+            // printf("First byte after: %u\n", buffer[0]);
         }
 
         // Send back same size data
@@ -58,7 +58,7 @@ int main() {
                    (struct sockaddr *)&client_addr, addr_len) < 0) {
             perror("sendto failed");
         } else {
-            printf("Sent back %zd bytes\n", n);
+            // printf("Sent back %zd bytes\n", n);
         }
     }
 

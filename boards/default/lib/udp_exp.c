@@ -195,16 +195,16 @@ uint8_t payload[], uint32_t payload_size, bool debug)
     tx_tail = reg_read32(accnet->udp_tx_regs, ACCNET_UDP_TX_RING_TAIL);
     tx_size = reg_read32(accnet->udp_tx_regs, ACCNET_UDP_TX_RING_SIZE);
 
-    memcpy((char *)accnet->udp_tx_buffer + tx_tail, payload, payload_size);
-
-    uint32_t new_tx_tail = (tx_tail + payload_size) % accnet->udp_tx_size;
-
     /* Preparing to receive the payload */
     uint32_t rx_head, rx_tail, rx_size;
     rx_head = reg_read32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_HEAD);
     rx_size = reg_read32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_SIZE);
     
     /* Triggering TX and starting time */
+    memcpy((char *)accnet->udp_tx_buffer + tx_tail, payload, payload_size);
+    uint32_t new_tx_tail = (tx_tail + payload_size) % accnet->udp_tx_size;
+
+    
     clock_gettime(CLOCK_MONOTONIC, &before);
     reg_write32(accnet->udp_tx_regs, ACCNET_UDP_TX_RING_TAIL, new_tx_tail);
 
@@ -241,14 +241,14 @@ struct timespec test_udp_latency_poll(struct accnet_info *accnet, uint8_t payloa
         printf("TX_HEAD: %u, TX_TAIL: %u, TX_SIZE: %u\n", tx_head, tx_tail, tx_size);
     }
 
+    
     if (debug) printf("Copying mem...\n");
     memcpy((char *)accnet->udp_tx_buffer + tx_tail, payload, payload_size);
-
+    
     uint32_t val = (tx_tail + payload_size) % accnet->udp_tx_size;
     if (debug) printf("Begin Test... (new_tail=%u) \n", val);
-
+    
     clock_gettime(CLOCK_MONOTONIC, &before);
-
     reg_write32(accnet->udp_tx_regs, ACCNET_UDP_TX_RING_TAIL, val);
     while (rx_tail != (rx_head + payload_size) % accnet->udp_rx_size) {
         rx_tail = reg_read32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_TAIL);
