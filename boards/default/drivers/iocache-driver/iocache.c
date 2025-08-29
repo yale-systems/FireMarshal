@@ -64,7 +64,6 @@ static irqreturn_t iocache_isr_rx(int irq, void *data) {
 
 	struct device *dev = data;
 	struct iocache_device *iocache = dev_get_drvdata(dev);
-    struct eventfd_ctx *ctx = NULL;
 
 	// save timestamp
 	u64 now = ktime_get_mono_fast_ns();   // OK in hard IRQ
@@ -77,6 +76,7 @@ static irqreturn_t iocache_isr_rx(int irq, void *data) {
     /* Safe from hard IRQ context */
     wake_up_interruptible(&iocache->wq);	
 
+    // struct eventfd_ctx *ctx = NULL;
 	// spin_lock(&iocache->ev_lock);
     // ctx = iocache->ev_ctx;
     // if (ctx)
@@ -215,10 +215,13 @@ static int iocache_remove(struct platform_device *pdev) {
         return 0;
 	}
 
-	free_irq(iocache->rx_irq, dev);
-	free_irq(iocache->txcomp_irq, dev);
-
     misc_deregister(&iocache->misc_dev);
+
+	clear_intmask_rx(iocache, IOCACHE_INTMASK_BOTH);
+
+	/* release DT irq mappings created with irq_of_parse_and_map */
+    if (iocache->txcomp_irq) 	irq_dispose_mapping(iocache->txcomp_irq);
+    if (iocache->rx_irq) 		irq_dispose_mapping(iocache->rx_irq);
 
 	return 0;
 }

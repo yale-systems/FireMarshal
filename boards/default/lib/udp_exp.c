@@ -264,6 +264,7 @@ struct timespec test_udp_latency_poll(struct accnet_info *accnet, uint8_t payloa
     tx_head = reg_read32(accnet->udp_tx_regs, ACCNET_UDP_TX_RING_HEAD);
     tx_tail = reg_read32(accnet->udp_tx_regs, ACCNET_UDP_TX_RING_TAIL);
     tx_size = reg_read32(accnet->udp_tx_regs, ACCNET_UDP_TX_RING_SIZE);
+    mmio_rmb();
 
     if (debug) {
         printf("RX_HEAD: %u, RX_TAIL: %u, RX_SIZE: %u\n", rx_head, rx_tail, rx_size);
@@ -281,6 +282,7 @@ struct timespec test_udp_latency_poll(struct accnet_info *accnet, uint8_t payloa
     reg_write32(accnet->udp_tx_regs, ACCNET_UDP_TX_RING_TAIL, val);
     while (rx_tail != (rx_head + payload_size) % accnet->udp_rx_size) {
         rx_tail = reg_read32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_TAIL);
+        mmio_rmb();
         ++counter;
         if (debug) {
             printf("Waiting for RX (new rx_tail=%u)...\n", rx_tail);
@@ -295,6 +297,7 @@ struct timespec test_udp_latency_poll(struct accnet_info *accnet, uint8_t payloa
     tx_head = reg_read32(accnet->udp_tx_regs, ACCNET_UDP_TX_RING_HEAD);
     tx_tail = reg_read32(accnet->udp_tx_regs, ACCNET_UDP_TX_RING_TAIL);
     tx_size = reg_read32(accnet->udp_tx_regs, ACCNET_UDP_TX_RING_SIZE);
+    mmio_rmb();
 
     if (debug) {
         printf("RX_HEAD: %u, RX_TAIL: %u, RX_SIZE: %u\n", rx_head, rx_tail, rx_size);

@@ -11,6 +11,7 @@
 #include <limits.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <time.h>
 #include <sys/epoll.h>
 #include <sys/time.h>
 #include <sys/eventfd.h>
@@ -91,7 +92,6 @@ static inline void iocache_clear_txcomp_suspended(struct iocache_info *iocache) 
 int iocache_wait_on_rx(struct iocache_info *iocache, struct timespec *time) { 
     struct epoll_event out;
     uint64_t cnt;
-    int rc;
 
 #ifndef CLOCK_MONOTONIC
 #define CLOCK_MONOTONIC 1
@@ -115,10 +115,11 @@ int iocache_wait_on_rx(struct iocache_info *iocache, struct timespec *time) {
     //     }
     // }
 
-    if (ioctl(iocache->fd, IOCACHE_IOCTL_WAIT_READY, &rc) == -1) {
+    if (ioctl(iocache->fd, IOCACHE_IOCTL_WAIT_READY) == -1) {
         perror("IOCACHE_IOCTL_WAIT_READY ioctl failed");
         return -1;
     }
+    
     clock_gettime(CLOCK_MONOTONIC, time);
 
     iocache_clear_rx_suspended(iocache);
