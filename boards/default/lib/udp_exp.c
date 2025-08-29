@@ -180,11 +180,11 @@ int main(int argc, char **argv) {
         ++received_ok;
         // printf("iter=%d rtt=%.3f us\n", i, rtt_ns / 1e3);
     }
-    double avg_us = (sum_ns / (double)n_tests) / 1e3;
+    double avg_us = (sum_ns / (double)received_ok) / 1e3;
     printf("\nResults (%s): recv=%d/%d  min=%.3f us  avg=%.3f us  max=%.3f us\n",
                 mode, received_ok, n_tests, min_ns/1e3, avg_us, max_ns/1e3);
     printf("Time breakdown average:\nIRQ-Before: %.3f us\nPreRead-IRQ: %.3f us\nAfter-PreRead: %.3f us\n",
-            time_ns[0]/(double)n_tests/1e3, time_ns[1]/(double)n_tests/1e3, time_ns[2]/(double)n_tests/1e3);
+            time_ns[0]/(double)received_ok/1e3, time_ns[1]/(double)received_ok/1e3, time_ns[2]/(double)received_ok/1e3);
 
     /* Close Accnet */
     accnet_close(accnet);
@@ -290,14 +290,15 @@ struct timespec test_udp_latency_poll(struct accnet_info *accnet, uint8_t payloa
     
     clock_gettime(CLOCK_MONOTONIC, &before);
     reg_write32(accnet->udp_tx_regs, ACCNET_UDP_TX_RING_TAIL, val);
-    while (rx_tail != (rx_head + payload_size) % accnet->udp_rx_size) {
+    do {
         rx_tail = reg_read32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_TAIL);
         mmio_rmb();
         ++counter;
         if (debug) {
             printf("Waiting for RX (new rx_tail=%u)...\n", rx_tail);
         }
-    }
+    } while (rx_tail != (rx_head + payload_size) % accnet->udp_rx_size);
+    
     clock_gettime(CLOCK_MONOTONIC, &after);
 
     rx_head = reg_read32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_HEAD);
