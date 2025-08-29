@@ -133,7 +133,19 @@ static long iocache_misc_ioctl(struct file *file, unsigned int cmd, unsigned lon
         if (copy_to_user((void __user *)arg, &val, sizeof(val)))
             return -EFAULT;
         return 0;
-    }
+    } else if (cmd == IOCACHE_IOCTL_WAIT_READY) {
+		int val = atomic_read(&iocache->ready);
+		if (val == 0) {
+			int ret = wait_event_interruptible(iocache->wq, atomic_read(&iocache->ready) != 0);
+			if (ret)
+				return ret;
+		}
+		val = atomic_read(&iocache->ready);
+		atomic_set(&iocache->ready, 0); // reset
+		if (copy_to_user((void __user *)arg, &val, sizeof(val)))
+			return -EFAULT;
+		return 0;
+	}
 	return -EINVAL;
 }
 

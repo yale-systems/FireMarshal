@@ -66,15 +66,22 @@ static irqreturn_t iocache_isr_rx(int irq, void *data) {
 	struct iocache_device *iocache = dev_get_drvdata(dev);
     struct eventfd_ctx *ctx = NULL;
 
-	clear_intmask_rx(iocache, IOCACHE_INTMASK_RX);
-
 	// save timestamp
 	u64 now = ktime_get_mono_fast_ns();   // OK in hard IRQ
     iocache->last_irq_ns = now;
 
-    ctx = iocache->ev_ctx;
-    if (ctx)
-        eventfd_signal(ctx, 1);   /* safe to call in hard IRQ */
+	clear_intmask_rx(iocache, IOCACHE_INTMASK_RX);
+
+	/* Update shared state first, then wake */
+    atomic_set(&iocache->ready, 1);
+    /* Safe from hard IRQ context */
+    wake_up_interruptible(&iocache->wq);	
+
+	// spin_lock(&iocache->ev_lock);
+    // ctx = iocache->ev_ctx;
+    // if (ctx)
+    //     eventfd_signal(ctx, 1);   /* safe to call in hard IRQ */
+	// spin_unlock(&iocache->ev_lock);
 
     return IRQ_HANDLED;
 }
@@ -176,6 +183,8 @@ static int iocache_probe(struct platform_device *pdev) {
 
 	spin_lock_init(&iocache->ev_lock);
 	u64_stats_init(&iocache->syncp);
+	init_waitqueue_head(&iocache->wq);
+    atomic_set(&iocache->ready, 0);
 
 	/* Register the misc device */
     iocache->misc_dev.minor = MISC_DYNAMIC_MINOR;

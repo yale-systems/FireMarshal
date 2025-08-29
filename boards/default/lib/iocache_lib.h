@@ -64,7 +64,7 @@ struct iocache_info {
 
 int iocache_open(char *file, struct iocache_info *iocache);
 int iocache_close(struct iocache_info *iocache);
-int iocache_wait_on_rx(struct iocache_info *iocache);
+int iocache_wait_on_rx(struct iocache_info *iocache, struct timespec *time);
 int iocache_wait_on_txcomp(struct iocache_info *iocache);
 
 static inline void iocache_setup_connection(struct iocache_info *iocache, struct connection_info *entry) {

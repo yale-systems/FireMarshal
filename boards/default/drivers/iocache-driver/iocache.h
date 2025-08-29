@@ -96,6 +96,9 @@ struct iocache_device {
 
 	struct u64_stats_sync syncp;
     u64 last_irq_ns;
+
+	wait_queue_head_t wq;
+    atomic_t ready; 
 };
 
 static int iocache_misc_open(struct inode *inode, struct file *filp);

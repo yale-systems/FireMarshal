@@ -12,6 +12,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <sys/epoll.h>
+#include <sys/time.h>
 #include <sys/eventfd.h>
 
 #include "iocache_ioctl.h"
@@ -87,25 +88,39 @@ static inline void iocache_clear_txcomp_suspended(struct iocache_info *iocache) 
     reg_write8(iocache->regs, IOCACHE_REG_TXCOMP_SUSPENDED(row),     0x0);
 }
 
-int iocache_wait_on_rx(struct iocache_info *iocache) { 
+int iocache_wait_on_rx(struct iocache_info *iocache, struct timespec *time) { 
     struct epoll_event out;
     uint64_t cnt;
+    int rc;
+
+#ifndef CLOCK_MONOTONIC
+#define CLOCK_MONOTONIC 1
+#endif
 
     if (iocache_is_rx_available(iocache))
         return 0;
 
     iocache_set_rx_suspended(iocache);
     _iocache_enable_interrupts_rx(iocache);
-    for (;;) {
-        epoll_wait(iocache->ep, &out, 1, -1);
-        if (out.events & EPOLLIN) {
-            read(iocache->efd, &cnt, sizeof(cnt)); 
-            break;
-        }
-        else {
-            printf("epoll_wait is out weird...\n");
-        }
+    // for (;;) {
+    //     epoll_wait(iocache->ep, &out, 1, -1);
+    //     clock_gettime(CLOCK_MONOTONIC, time);
+
+    //     if (out.events & EPOLLIN) {
+    //         read(iocache->efd, &cnt, sizeof(cnt)); 
+    //         break;
+    //     }
+    //     else {
+    //         printf("epoll_wait is out weird...\n");
+    //     }
+    // }
+
+    if (ioctl(iocache->fd, IOCACHE_IOCTL_WAIT_READY, &rc) == -1) {
+        perror("IOCACHE_IOCTL_WAIT_READY ioctl failed");
+        return -1;
     }
+    clock_gettime(CLOCK_MONOTONIC, time);
+
     iocache_clear_rx_suspended(iocache);
 
     return 0;

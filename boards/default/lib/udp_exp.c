@@ -38,6 +38,8 @@ struct timespec test_udp_latency_block(struct accnet_info *accnet, struct iocach
                                         uint8_t payload[], uint32_t payload_size, bool debug);
 struct timespec test_udp_latency_poll(struct accnet_info *accnet, uint8_t payload[], uint32_t payload_size, bool debug);
 
+uint64_t time_ns[8] = {0};
+
 int main(int argc, char **argv) {
     char *accnet_filename = "/dev/accnet-misc";
     char *iocache_filename = "/dev/iocache-misc";
@@ -175,6 +177,8 @@ int main(int argc, char **argv) {
     double avg_us = (sum_ns / (double)n_tests) / 1e3;
     printf("\nResults (%s): recv=%d  min=%.3f us  avg=%.3f us  max=%.3f us\n",
                 mode, n_tests, min_ns/1e3, avg_us, max_ns/1e3);
+    printf("Time breakdown average:\nIRQ-Before: %.3f us\nPreRead-IRQ: %.3f us\nAfter-PreRead: %.3f us\n",
+            time_ns[0]/(double)n_tests/1e3, time_ns[1]/(double)n_tests/1e3, time_ns[2]/(double)n_tests/1e3);
 
     /* Close Accnet */
     accnet_close(accnet);
@@ -188,7 +192,7 @@ int main(int argc, char **argv) {
 struct timespec test_udp_latency_block(struct accnet_info *accnet, struct iocache_info *iocache,
 uint8_t payload[], uint32_t payload_size, bool debug) 
 {
-    struct timespec before, after;
+    struct timespec before, mid, after;
     __u64 last_irq_ns = 0;
 
     /* Preparing to send the payload */
@@ -211,7 +215,7 @@ uint8_t payload[], uint32_t payload_size, bool debug)
     reg_write32(accnet->udp_tx_regs, ACCNET_UDP_TX_RING_TAIL, new_tx_tail);
 
     /* Waiting for RX */
-    iocache_wait_on_rx(iocache);
+    iocache_wait_on_rx(iocache, &mid);
     clock_gettime(CLOCK_MONOTONIC, &after);
 
     /* Updating RX HEAD */
@@ -222,17 +226,20 @@ uint8_t payload[], uint32_t payload_size, bool debug)
 
     // IRQ timestamp
     if (iocache_get_last_irq_ns(iocache, &last_irq_ns) == 0) {
-        struct timespec irq_ts, diff1, diff2;
+        struct timespec irq_ts, diff1, diff2, diff3;
         irq_ts.tv_sec  = last_irq_ns / 1000000000ULL;
         irq_ts.tv_nsec = last_irq_ns % 1000000000ULL;
         diff1 = timespec_diff(&before, &irq_ts);
-        diff2 = timespec_diff(&irq_ts, &after);
+        diff2 = timespec_diff(&irq_ts, &mid);
+        diff3 = timespec_diff(&mid, &after);
 
-        printf("Before: %lld.%09ld\n", (long long)before.tv_sec, before.tv_nsec);
-        printf("IRQ   : %lld.%09ld, (IRQ-Before:   %lld.%09ld)=\n", 
-            (long long)irq_ts.tv_sec, irq_ts.tv_nsec, (long long)diff1.tv_sec, diff1.tv_nsec);
-        printf("After : %lld.%09ld, (After-IRQ: %lld.%09ld)=\n", 
-            (long long)after.tv_sec, after.tv_nsec, (long long)diff2.tv_sec, diff2.tv_nsec);
+        printf("    IRQ-Before:     %lld.%09ld\n", (long long)diff1.tv_sec, diff1.tv_nsec);
+        printf("    PreRead-IRQ:    %lld.%09ld\n", (long long)diff2.tv_sec, diff2.tv_nsec);
+        printf("    After-PreRead:  %lld.%09ld\n", (long long)diff3.tv_sec, diff3.tv_nsec);
+
+        time_ns[0] += diff1.tv_sec * 1e9 + diff1.tv_nsec;
+        time_ns[1] += diff2.tv_sec * 1e9 + diff2.tv_nsec;
+        time_ns[2] += diff3.tv_sec * 1e9 + diff3.tv_nsec;
     } else {
         printf("iocache_get_last_irq_ns failed\n");
     }
@@ -243,6 +250,8 @@ uint8_t payload[], uint32_t payload_size, bool debug)
 struct timespec test_udp_latency_poll(struct accnet_info *accnet, uint8_t payload[], uint32_t payload_size, bool debug)
 {
     struct timespec before, after;
+
+    int counter = 0;
 
     uint32_t rx_head, rx_tail, rx_size;
     uint32_t tx_head, tx_tail, tx_size;
@@ -272,6 +281,7 @@ struct timespec test_udp_latency_poll(struct accnet_info *accnet, uint8_t payloa
     reg_write32(accnet->udp_tx_regs, ACCNET_UDP_TX_RING_TAIL, val);
     while (rx_tail != (rx_head + payload_size) % accnet->udp_rx_size) {
         rx_tail = reg_read32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_TAIL);
+        ++counter;
         if (debug) {
             printf("Waiting for RX (new rx_tail=%u)...\n", rx_tail);
         }
@@ -301,6 +311,8 @@ struct timespec test_udp_latency_poll(struct accnet_info *accnet, uint8_t payloa
         }
         printf("\n");
     }
+
+    printf("RX waited %d times\n", counter);
 
     // Updating RX HEAD
     reg_write32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_HEAD, rx_tail);

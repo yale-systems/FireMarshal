@@ -139,7 +139,7 @@ static void *recv_thread(void *arg) {
     rx_size = accnet_get_rx_size(accnet);
     rx_head = accnet_get_rx_head(accnet);
 
-    res = iocache_wait_on_rx(iocache);
+    res = iocache_wait_on_rx(iocache, NULL);
     clock_gettime(CLOCK_MONOTONIC, &ts);
     t_end_ns = timespec_to_ns(&ts);
 

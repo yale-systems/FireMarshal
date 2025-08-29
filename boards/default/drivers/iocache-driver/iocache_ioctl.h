@@ -35,4 +35,6 @@ struct iocache_ioctl_region_info {
 /* userspace gets a long int which is last RX */
 #define IOCACHE_IOCTL_GET_LAST_IRQ_NS _IOR(IOCACHE_IOCTL_TYPE, IOCACHE_IOCTL_BASE + 4, __u64)
 
+#define IOCACHE_IOCTL_WAIT_READY _IOR(IOCACHE_IOCTL_TYPE, IOCACHE_IOCTL_BASE + 5, int)
+
 #endif /* __IOCACHE_IOCTL_H */
