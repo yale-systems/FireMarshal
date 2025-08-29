@@ -833,12 +833,6 @@ static int accnet_remove(struct platform_device *pdev)
                           nic->dma_region_udp_rx,
                           nic->dma_region_addr_udp_rx);
 
-    /* release DT irq mappings created with irq_of_parse_and_map */
-    if (nic->tx_irq)
-        irq_dispose_mapping(nic->tx_irq);
-    if (nic->rx_irq)
-        irq_dispose_mapping(nic->rx_irq);
-
     return 0;
 }
 

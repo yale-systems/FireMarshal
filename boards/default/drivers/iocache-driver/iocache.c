@@ -219,10 +219,6 @@ static int iocache_remove(struct platform_device *pdev) {
 
 	clear_intmask_rx(iocache, IOCACHE_INTMASK_BOTH);
 
-	/* release DT irq mappings created with irq_of_parse_and_map */
-    if (iocache->txcomp_irq) 	irq_dispose_mapping(iocache->txcomp_irq);
-    if (iocache->rx_irq) 		irq_dispose_mapping(iocache->rx_irq);
-
 	return 0;
 }
 
