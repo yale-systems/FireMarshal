@@ -155,8 +155,9 @@ int main(int argc, char **argv) {
     long long sum_ns = 0, min_ns = 0, max_ns = 0;
 
     /* Run Test */
+    int received_ok = 0;
     for (int i = 0; i < n_tests; i++) {
-        struct timespec diff;
+        struct timespec diff = {0, 0};
 
         if (strcmp(mode, MODE_POLLING) == 0) {
             diff = test_udp_latency_poll(accnet, payload, payload_size, debug); 
@@ -164,6 +165,10 @@ int main(int argc, char **argv) {
         else if (strcmp(mode, MODE_BLOCKING) == 0) {
             diff = test_udp_latency_block(accnet, iocache, payload, payload_size, debug);
         }
+        if (diff.tv_sec == 0 && diff.tv_nsec == 0) {
+            continue;
+        }
+
         long long rtt_ns = diff.tv_sec * 1e9 + diff.tv_nsec;
         if (i == 0) {
             min_ns = max_ns = rtt_ns;
@@ -172,11 +177,12 @@ int main(int argc, char **argv) {
             if (rtt_ns > max_ns) max_ns = rtt_ns;
         }
         sum_ns += rtt_ns;
-        printf("iter=%d rtt=%.3f us\n", i, rtt_ns / 1e3);
+        ++received_ok;
+        // printf("iter=%d rtt=%.3f us\n", i, rtt_ns / 1e3);
     }
     double avg_us = (sum_ns / (double)n_tests) / 1e3;
-    printf("\nResults (%s): recv=%d  min=%.3f us  avg=%.3f us  max=%.3f us\n",
-                mode, n_tests, min_ns/1e3, avg_us, max_ns/1e3);
+    printf("\nResults (%s): recv=%d/%d  min=%.3f us  avg=%.3f us  max=%.3f us\n",
+                mode, received_ok, n_tests, min_ns/1e3, avg_us, max_ns/1e3);
     printf("Time breakdown average:\nIRQ-Before: %.3f us\nPreRead-IRQ: %.3f us\nAfter-PreRead: %.3f us\n",
             time_ns[0]/(double)n_tests/1e3, time_ns[1]/(double)n_tests/1e3, time_ns[2]/(double)n_tests/1e3);
 
@@ -194,6 +200,7 @@ uint8_t payload[], uint32_t payload_size, bool debug)
 {
     struct timespec before, mid, after;
     __u64 last_irq_ns = 0;
+    int ret;
 
     /* Preparing to send the payload */
     uint32_t tx_head, tx_tail, tx_size;
@@ -205,7 +212,8 @@ uint8_t payload[], uint32_t payload_size, bool debug)
     uint32_t rx_head, rx_tail, rx_size;
     rx_head = reg_read32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_HEAD);
     rx_size = reg_read32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_SIZE);
-    
+    mmio_rmb();
+
     /* Triggering TX and starting time */
     memcpy((char *)accnet->udp_tx_buffer + tx_tail, payload, payload_size);
     uint32_t new_tx_tail = (tx_tail + payload_size) % accnet->udp_tx_size;
@@ -213,9 +221,10 @@ uint8_t payload[], uint32_t payload_size, bool debug)
     
     clock_gettime(CLOCK_MONOTONIC, &before);
     reg_write32(accnet->udp_tx_regs, ACCNET_UDP_TX_RING_TAIL, new_tx_tail);
+    mmio_wmb();
 
     /* Waiting for RX */
-    iocache_wait_on_rx(iocache, &mid);
+    ret = iocache_wait_on_rx(iocache, &mid);
     clock_gettime(CLOCK_MONOTONIC, &after);
 
     /* Updating RX HEAD */
@@ -223,26 +232,27 @@ uint8_t payload[], uint32_t payload_size, bool debug)
     int size = (rx_tail > rx_head) ? rx_tail - rx_head : rx_size - (rx_head - rx_tail);
     reg_write32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_HEAD, rx_tail);
 
+    if (ret != 0) return (struct timespec){0, 0};
 
-    // IRQ timestamp
-    if (iocache_get_last_irq_ns(iocache, &last_irq_ns) == 0) {
-        struct timespec irq_ts, diff1, diff2, diff3;
-        irq_ts.tv_sec  = last_irq_ns / 1000000000ULL;
-        irq_ts.tv_nsec = last_irq_ns % 1000000000ULL;
-        diff1 = timespec_diff(&before, &irq_ts);
-        diff2 = timespec_diff(&irq_ts, &mid);
-        diff3 = timespec_diff(&mid, &after);
+    /* IRQ timestamp */
+    // if (iocache_get_last_irq_ns(iocache, &last_irq_ns) == 0) {
+    //     struct timespec irq_ts, diff1, diff2, diff3;
+    //     irq_ts.tv_sec  = last_irq_ns / 1000000000ULL;
+    //     irq_ts.tv_nsec = last_irq_ns % 1000000000ULL;
+    //     diff1 = timespec_diff(&before, &irq_ts);
+    //     diff2 = timespec_diff(&irq_ts, &mid);
+    //     diff3 = timespec_diff(&mid, &after);
 
-        printf("    IRQ-Before:     %lld.%09ld\n", (long long)diff1.tv_sec, diff1.tv_nsec);
-        printf("    PreRead-IRQ:    %lld.%09ld\n", (long long)diff2.tv_sec, diff2.tv_nsec);
-        printf("    After-PreRead:  %lld.%09ld\n", (long long)diff3.tv_sec, diff3.tv_nsec);
+    //     // printf("    IRQ-Before:     %lld.%09ld\n", (long long)diff1.tv_sec, diff1.tv_nsec);
+    //     // printf("    PreRead-IRQ:    %lld.%09ld\n", (long long)diff2.tv_sec, diff2.tv_nsec);
+    //     // printf("    After-PreRead:  %lld.%09ld\n", (long long)diff3.tv_sec, diff3.tv_nsec);
 
-        time_ns[0] += diff1.tv_sec * 1e9 + diff1.tv_nsec;
-        time_ns[1] += diff2.tv_sec * 1e9 + diff2.tv_nsec;
-        time_ns[2] += diff3.tv_sec * 1e9 + diff3.tv_nsec;
-    } else {
-        printf("iocache_get_last_irq_ns failed\n");
-    }
+    //     time_ns[0] += diff1.tv_sec * 1e9 + diff1.tv_nsec;
+    //     time_ns[1] += diff2.tv_sec * 1e9 + diff2.tv_nsec;
+    //     time_ns[2] += diff3.tv_sec * 1e9 + diff3.tv_nsec;
+    // } else {
+    //     printf("iocache_get_last_irq_ns failed\n");
+    // }
 
     return timespec_diff(&before, &after);
 }
@@ -300,6 +310,8 @@ struct timespec test_udp_latency_poll(struct accnet_info *accnet, uint8_t payloa
     mmio_rmb();
 
     if (debug) {
+        printf("RX waited %d times\n", counter);
+
         printf("RX_HEAD: %u, RX_TAIL: %u, RX_SIZE: %u\n", rx_head, rx_tail, rx_size);
         printf("TX_HEAD: %u, TX_TAIL: %u, TX_SIZE: %u\n", tx_head, tx_tail, tx_size);
 
@@ -314,8 +326,6 @@ struct timespec test_udp_latency_poll(struct accnet_info *accnet, uint8_t payloa
         }
         printf("\n");
     }
-
-    printf("RX waited %d times\n", counter);
 
     // Updating RX HEAD
     reg_write32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_HEAD, rx_tail);

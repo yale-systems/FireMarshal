@@ -142,7 +142,7 @@ int main(int argc, char **argv) {
         sum_ns += rtt_ns;
         received_ok++;
 
-        printf("iter=%d rtt=%.3f ms\n", i, rtt_ns / 1e6);
+        // printf("iter=%d rtt=%.3f ms\n", i, rtt_ns / 1e6);
     }
 
     if (received_ok > 0) {

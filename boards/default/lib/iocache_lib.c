@@ -115,7 +115,8 @@ int iocache_wait_on_rx(struct iocache_info *iocache, struct timespec *time) {
     //     }
     // }
 
-    if (ioctl(iocache->fd, IOCACHE_IOCTL_WAIT_READY) == -1) {
+    if (ioctl(iocache->fd, IOCACHE_IOCTL_WAIT_READY) != 0) {
+        iocache_clear_rx_suspended(iocache);
         perror("IOCACHE_IOCTL_WAIT_READY ioctl failed");
         return -1;
     }

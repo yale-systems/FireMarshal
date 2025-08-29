@@ -134,12 +134,13 @@ static long iocache_misc_ioctl(struct file *file, unsigned int cmd, unsigned lon
             return -EFAULT;
         return 0;
     } else if (cmd == IOCACHE_IOCTL_WAIT_READY) {
-		int ret = wait_event_interruptible(iocache->wq, atomic_read(&iocache->ready) != 0);
-		if (ret)
-			return ret;
+		int ret = wait_event_interruptible_timeout(
+					iocache->wq, 
+					atomic_read(&iocache->ready) != 0,
+					msecs_to_jiffies(1000));
 
 		atomic_set(&iocache->ready, 0); // reset
-		return 0;
+		return ret;
 	}
 	return -EINVAL;
 }
