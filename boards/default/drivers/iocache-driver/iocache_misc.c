@@ -137,9 +137,13 @@ static long iocache_misc_ioctl(struct file *file, unsigned int cmd, unsigned lon
 		int ret = wait_event_interruptible_timeout(
 					iocache->wq, 
 					atomic_read(&iocache->ready) != 0,
-					msecs_to_jiffies(5000));
-
+					msecs_to_jiffies(1000));
+		
 		atomic_set(&iocache->ready, 0); // reset
+
+		if (copy_to_user((void __user *)arg, &ret, sizeof(ret)))
+            return -EFAULT;
+
 		return 0;
 	}
 	return -EINVAL;

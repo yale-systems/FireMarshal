@@ -232,7 +232,7 @@ uint8_t payload[], uint32_t payload_size, bool debug)
     int size = (rx_tail > rx_head) ? rx_tail - rx_head : rx_size - (rx_head - rx_tail);
     reg_write32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_HEAD, rx_tail);
 
-    if (ret != 0) return (struct timespec){0, 0};
+    if (ret == -1) return (struct timespec){0, 0};
 
     /* IRQ timestamp */
     // if (iocache_get_last_irq_ns(iocache, &last_irq_ns) == 0) {
