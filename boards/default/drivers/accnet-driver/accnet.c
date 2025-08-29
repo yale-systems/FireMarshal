@@ -808,11 +808,8 @@ static int accnet_remove(struct platform_device *pdev)
 
     /* stop userspace entry points first */
     misc_deregister(&nic->misc_dev);
-
-    /* bring down netdev */
-    if (netif_running(ndev))
-        dev_close(ndev);                   /* calls ndo_stop */
-    unregister_netdev(ndev);               /* safe if not running */
+	
+    unregister_netdev(ndev);
 
     /* tear down NAPI hook */
     netif_napi_del(&nic->napi);
