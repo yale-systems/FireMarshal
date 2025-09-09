@@ -13,7 +13,7 @@ SYSROOT ?=
 CFLAGS  ?= -O2 -g -Wall -Wextra -Wformat=2 -Wshadow -Wpointer-arith
 CFLAGS  += -Wcast-qual -Wstrict-prototypes -Wmissing-prototypes
 CPPFLAGS :=
-LDFLAGS  =
+LDFLAGS  = -D_GNU_SOURCE
 LDLIBS   = -pthread
 
 ifneq ($(strip $(SYSROOT)),)

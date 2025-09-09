@@ -149,6 +149,13 @@ int iocache_get_last_irq_ns(struct iocache_info *iocache, __u64 *ns) {
     return 0;
 }
 
+int iocache_get_last_cycles(struct iocache_info *iocache, __u64 cycle[3]) {
+    if (ioctl(iocache->fd, IOCACHE_IOCTL_GET_CYCLES, cycle) == -1) {
+        perror("IOCACHE_IOCTL_GET_CYCLES ioctl failed");
+        return -1;
+    }
+    return 0;
+}
 
 int iocache_open(char *file, struct iocache_info *iocache) {
     

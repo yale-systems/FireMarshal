@@ -94,8 +94,10 @@ struct iocache_device {
 	
 	unsigned long magic;
 
+	void __iomem *plic_base;
+
 	struct u64_stats_sync syncp;
-    u64 last_irq_ns;
+    u64 last_irq_ns, isr_cyc, entry_cyc, claim_cyc;
 
 	wait_queue_head_t wq;
     atomic_t ready; 

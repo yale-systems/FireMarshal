@@ -133,6 +133,12 @@ static long iocache_misc_ioctl(struct file *file, unsigned int cmd, unsigned lon
         if (copy_to_user((void __user *)arg, &val, sizeof(val)))
             return -EFAULT;
         return 0;
+    } else if (cmd == IOCACHE_IOCTL_GET_CYCLES) {
+		u64 val[3] = {iocache->isr_cyc, iocache->entry_cyc, iocache->claim_cyc};
+		
+        if (copy_to_user((void __user *)arg, &val, sizeof(val)))
+            return -EFAULT;
+        return 0;
     } else if (cmd == IOCACHE_IOCTL_WAIT_READY) {
 		int ret = wait_event_interruptible_timeout(
 					iocache->wq, 

@@ -16,6 +16,8 @@
 #include <linux/of_pci.h>
 #include <linux/of_platform.h>
 #include <linux/of_irq.h>
+#include <linux/of.h>
+#include <linux/io.h>
 
 #include <linux/netdevice.h>
 #include <linux/etherdevice.h>
@@ -23,13 +25,23 @@
 #include <linux/dma-mapping.h>
 #include <linux/miscdevice.h>
 
-#include "iocache_misc.c"
-#include "iocache_ioctl.h"
 #include "iocache.h"
+#include "iocache_ioctl.h"
+#include "iocache_misc.c"
+#include "iocache_plic.c"
+
 
 MODULE_DESCRIPTION("iocache driver");
 MODULE_AUTHOR("Amirmohammad Nazari");
 MODULE_LICENSE("Dual MIT/GPL");
+
+/* Put near the top of your .c file */
+static __always_inline u64 rdcycle_inline(void)
+{
+    u64 v;
+    asm volatile ("rdcycle %0" : "=r"(v));
+    return v;
+}
 
 static inline void set_intmask_rx(struct iocache_device *iocache, uint32_t mask)
 {
@@ -59,8 +71,11 @@ static const struct file_operations iocache_fops = {
 	.unlocked_ioctl = iocache_misc_ioctl,
 };
 
+extern u64 riscv_get_irq_entry_cycle(void);   // from do_irq patch
+extern u64 riscv_get_plic_claim_cycle(void);  // new, from plic_handle_irq
+
 static irqreturn_t iocache_isr_rx(int irq, void *data) {
-	printk(KERN_DEBUG "RX interrupt received\n");
+	// printk(KERN_DEBUG "RX interrupt received\n");
 
 	struct device *dev = data;
 	struct iocache_device *iocache = dev_get_drvdata(dev);
@@ -69,12 +84,16 @@ static irqreturn_t iocache_isr_rx(int irq, void *data) {
 	u64 now = ktime_get_mono_fast_ns();   // OK in hard IRQ
     iocache->last_irq_ns = now;
 
+	iocache->isr_cyc   = rdcycle_inline();
+    iocache->entry_cyc = riscv_get_irq_entry_cycle();
+    iocache->claim_cyc = riscv_get_plic_claim_cycle();
+
 	clear_intmask_rx(iocache, IOCACHE_INTMASK_RX);
 
 	/* Update shared state first, then wake */
     atomic_set(&iocache->ready, 1);
     /* Safe from hard IRQ context */
-    wake_up_interruptible(&iocache->wq);	
+    wake_up_interruptible(&iocache->wq);
 
     // struct eventfd_ctx *ctx = NULL;
 	// spin_lock(&iocache->ev_lock);
@@ -87,7 +106,7 @@ static irqreturn_t iocache_isr_rx(int irq, void *data) {
 }
 
 static irqreturn_t iocache_isr_txcomp(int irq, void *data) {
-	printk(KERN_DEBUG "TX interrupt received\n");
+	// printk(KERN_DEBUG "TX interrupt received\n");
 	// Nothing for now
 	return IRQ_HANDLED;
 }
@@ -179,6 +198,9 @@ static int iocache_probe(struct platform_device *pdev) {
 		return ret;
 
 	if ((ret = iocache_parse_irq(iocache)) < 0)
+		return ret;
+	
+	if ((ret = plic_set_prio(iocache)) != 0)
 		return ret;
 
 	spin_lock_init(&iocache->ev_lock);
