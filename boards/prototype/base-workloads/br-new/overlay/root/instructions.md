@@ -1,5 +1,16 @@
 Use these commands:
 
+Make files executable:
+```shell
+chmod +x udp_* interrupt_exp
+```
+
+(Optional) Pin AccNIC's interrupts to CPU 0. You may use `echo f >` to assign them to all cores.
+```shell
+echo 1 > /proc/irq/14/smp_affinity
+echo 1 > /proc/irq/15/smp_affinity
+```
+
 Running udp echo experiment with kernel `socket` implementation using AccNIC:
 ```shell
 ./udp_client_kernel --ntest 64 --payload-size 64
