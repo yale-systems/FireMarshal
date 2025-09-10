@@ -89,32 +89,16 @@ static inline void iocache_clear_txcomp_suspended(struct iocache_info *iocache) 
     reg_write8(iocache->regs, IOCACHE_REG_TXCOMP_SUSPENDED(row),     0x0);
 }
 
-int iocache_wait_on_rx(struct iocache_info *iocache, struct timespec *time) { 
+int iocache_wait_on_rx(struct iocache_info *iocache) { 
     struct epoll_event out;
     uint64_t cnt;
     int rc;
-
-#ifndef CLOCK_MONOTONIC
-#define CLOCK_MONOTONIC 1
-#endif
 
     if (iocache_is_rx_available(iocache))
         return 0;
 
     iocache_set_rx_suspended(iocache);
     _iocache_enable_interrupts_rx(iocache);
-    // for (;;) {
-    //     epoll_wait(iocache->ep, &out, 1, -1);
-    //     clock_gettime(CLOCK_MONOTONIC, time);
-
-    //     if (out.events & EPOLLIN) {
-    //         read(iocache->efd, &cnt, sizeof(cnt)); 
-    //         break;
-    //     }
-    //     else {
-    //         printf("epoll_wait is out weird...\n");
-    //     }
-    // }
 
     if (ioctl(iocache->fd, IOCACHE_IOCTL_WAIT_READY, &rc) == -1) {
         iocache_clear_rx_suspended(iocache);
@@ -125,8 +109,7 @@ int iocache_wait_on_rx(struct iocache_info *iocache, struct timespec *time) {
         iocache_clear_rx_suspended(iocache);
         return -1;
     }
-    
-    clock_gettime(CLOCK_MONOTONIC, time);
+
     iocache_clear_rx_suspended(iocache);
     return 0;
 }
@@ -149,9 +132,9 @@ int iocache_get_last_irq_ns(struct iocache_info *iocache, __u64 *ns) {
     return 0;
 }
 
-int iocache_get_last_cycles(struct iocache_info *iocache, __u64 cycle[3]) {
-    if (ioctl(iocache->fd, IOCACHE_IOCTL_GET_CYCLES, cycle) == -1) {
-        perror("IOCACHE_IOCTL_GET_CYCLES ioctl failed");
+int iocache_get_last_ktimes(struct iocache_info *iocache, __u64 ktimes[3]) {
+    if (ioctl(iocache->fd, IOCACHE_IOCTL_GET_KTIMES, ktimes) == -1) {
+        perror("IOCACHE_IOCTL_GET_KTIMES ioctl failed");
         return -1;
     }
     return 0;

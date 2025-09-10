@@ -17,6 +17,15 @@
 #define PLIC_PRIO_OFF(hwirq)   (0x00000000u + 4u * (hwirq))
 #define MAX_PRIORITY           0xFFFFFFFF
 
+/* Provided by our patched PLIC file */
+int plic_register_source_handler(int hwirq,
+                                 irqreturn_t (*fn)(int, void *),
+                                 void *data);
+
+/* Provided by our patched PLIC file */
+int plic_unregister_source_handler(int hwirq);
+
+								 
 static unsigned int get_hwirq(unsigned int virq)
 {
     struct irq_data *d = irq_get_irq_data(virq);
@@ -60,9 +69,10 @@ static int plic_set_prio(struct iocache_device *iocache) {
 	hwirq = get_hwirq(iocache->rx_irq);
 	if (!hwirq) {
 		dev_err(iocache->dev, "could not resolve hwirq for RX irq %d\n",
-				iocache->rx_irq);
+			iocache->rx_irq);
 		return ret;
 	} else {
+		iocache->rx_hwirq = hwirq;
 		plic_set_src_prio(iocache, hwirq, MAX_PRIORITY);
 	}
 
@@ -73,8 +83,52 @@ static int plic_set_prio(struct iocache_device *iocache) {
 				iocache->txcomp_irq);
 		return ret;
 	} else {
+		iocache->txcomp_hwirq = hwirq;
 		plic_set_src_prio(iocache, hwirq, MAX_PRIORITY);
 	}
 
     return 0;
+}
+
+static int plic_register_fast_path(
+	struct iocache_device *iocache, 
+	irqreturn_t (*fn_rx)(int, void *), 
+	irqreturn_t (*fn_txcomp)(int, void *)
+) {
+    int ret;
+	unsigned int hwirq;
+
+	/* RX IRQ: resolve to hwirq and Register PLIC bypass */
+	hwirq = get_hwirq(iocache->rx_irq);
+	if (!hwirq) {
+		dev_err(iocache->dev, "could not resolve hwirq for RX irq %d\n",
+				iocache->rx_irq);
+		return ret;
+	} else {
+		iocache->rx_hwirq = hwirq;
+        ret = plic_register_source_handler(hwirq, fn_rx, iocache);
+        if (ret) 
+			return ret;
+	}
+
+	/* TX completion IRQ: resolve to hwirq and Register PLIC bypass */
+	hwirq = get_hwirq(iocache->txcomp_irq);
+	if (!hwirq) {
+		dev_err(iocache->dev, "could not resolve hwirq for TXCOMP irq %d\n",
+				iocache->txcomp_irq);
+		return ret;
+	} else {
+		iocache->txcomp_hwirq = hwirq;
+		ret = plic_register_source_handler(hwirq, fn_txcomp, iocache);
+        if (ret) 
+			return ret;
+	}
+
+    return 0;
+}
+
+static int plic_unregister_fast_path(struct iocache_device *iocache) {
+	plic_unregister_source_handler(iocache->rx_hwirq);
+	plic_unregister_source_handler(iocache->txcomp_hwirq);
+	return 0;
 }

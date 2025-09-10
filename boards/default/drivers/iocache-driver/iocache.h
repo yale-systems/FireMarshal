@@ -80,8 +80,8 @@
 struct iocache_device {
 	struct device *dev;
 	
-	int rx_irq;
-	int txcomp_irq;
+	int rx_irq, rx_hwirq;
+	int txcomp_irq, txcomp_hwirq;
 
 	resource_size_t hw_regs_control_size;
 	phys_addr_t hw_regs_control_phys;
@@ -97,7 +97,7 @@ struct iocache_device {
 	void __iomem *plic_base;
 
 	struct u64_stats_sync syncp;
-    u64 last_irq_ns, isr_cyc, entry_cyc, claim_cyc;
+    u64 last_irq_ns, isr_ktime, entry_ktime, claim_ktime;
 
 	wait_queue_head_t wq;
     atomic_t ready; 

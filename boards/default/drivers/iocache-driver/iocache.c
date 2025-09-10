@@ -35,13 +35,6 @@ MODULE_DESCRIPTION("iocache driver");
 MODULE_AUTHOR("Amirmohammad Nazari");
 MODULE_LICENSE("Dual MIT/GPL");
 
-/* Put near the top of your .c file */
-static __always_inline u64 rdcycle_inline(void)
-{
-    u64 v;
-    asm volatile ("rdcycle %0" : "=r"(v));
-    return v;
-}
 
 static inline void set_intmask_rx(struct iocache_device *iocache, uint32_t mask)
 {
@@ -71,36 +64,29 @@ static const struct file_operations iocache_fops = {
 	.unlocked_ioctl = iocache_misc_ioctl,
 };
 
-extern u64 riscv_get_irq_entry_cycle(void);   // from do_irq patch
-extern u64 riscv_get_plic_claim_cycle(void);  // new, from plic_handle_irq
+extern u64 riscv_get_irq_entry_ktime(void);   // from do_irq patch
+extern u64 riscv_get_plic_claim_ktime(void);  // new, from plic_handle_irq
 
 static irqreturn_t iocache_isr_rx(int irq, void *data) {
 	// printk(KERN_DEBUG "RX interrupt received\n");
 
-	struct device *dev = data;
-	struct iocache_device *iocache = dev_get_drvdata(dev);
+	struct iocache_device *iocache = data;
 
 	// save timestamp
 	u64 now = ktime_get_mono_fast_ns();   // OK in hard IRQ
     iocache->last_irq_ns = now;
 
-	iocache->isr_cyc   = rdcycle_inline();
-    iocache->entry_cyc = riscv_get_irq_entry_cycle();
-    iocache->claim_cyc = riscv_get_plic_claim_cycle();
+	iocache->isr_ktime   = now;
+    iocache->entry_ktime = riscv_get_irq_entry_ktime();
+    iocache->claim_ktime = riscv_get_plic_claim_ktime();
 
 	clear_intmask_rx(iocache, IOCACHE_INTMASK_RX);
 
 	/* Update shared state first, then wake */
     atomic_set(&iocache->ready, 1);
+
     /* Safe from hard IRQ context */
     wake_up_interruptible(&iocache->wq);
-
-    // struct eventfd_ctx *ctx = NULL;
-	// spin_lock(&iocache->ev_lock);
-    // ctx = iocache->ev_ctx;
-    // if (ctx)
-    //     eventfd_signal(ctx, 1);   /* safe to call in hard IRQ */
-	// spin_unlock(&iocache->ev_lock);
 
     return IRQ_HANDLED;
 }
@@ -128,7 +114,7 @@ static int iocache_parse_irq(struct iocache_device *iocache) {
 	dev_info(dev, "Requesting RX IRQ %d\n", iocache->rx_irq);
 	err = devm_request_irq(dev, iocache->rx_irq, iocache_isr_rx,
 			IRQF_SHARED | IRQF_NO_THREAD,
-			IOCACHE_NAME, dev);
+			IOCACHE_NAME, iocache);
 	if (err) {
 		dev_err(dev, "could not obtain rx irq %d\n", iocache->rx_irq);
 		return err;
@@ -143,7 +129,7 @@ static int iocache_parse_irq(struct iocache_device *iocache) {
 	dev_info(dev, "Requesting TX_COMP IRQ %d\n", iocache->txcomp_irq);
 	err = devm_request_irq(dev, iocache->txcomp_irq, iocache_isr_txcomp,
 			IRQF_SHARED | IRQF_NO_THREAD,
-			IOCACHE_NAME, dev);
+			IOCACHE_NAME, iocache);
 	if (err) {
 		dev_err(dev, "could not obtain tx_comp irq %d\n", iocache->txcomp_irq);
 		return err;
@@ -208,6 +194,10 @@ static int iocache_probe(struct platform_device *pdev) {
 	init_waitqueue_head(&iocache->wq);
     atomic_set(&iocache->ready, 0);
 
+	// plic_unregister_fast_path(iocache);
+	if ((ret = plic_register_fast_path(iocache, iocache_isr_rx, iocache_isr_txcomp)) != 0)
+		return ret;
+
 	/* Register the misc device */
     iocache->misc_dev.minor = MISC_DYNAMIC_MINOR;
     iocache->misc_dev.name = "iocache-misc";
@@ -236,6 +226,8 @@ static int iocache_remove(struct platform_device *pdev) {
 		dev_warn(dev, "Could not find misc device to deregister");
         return 0;
 	}
+	
+	plic_unregister_fast_path(iocache);
 
     misc_deregister(&iocache->misc_dev);
 

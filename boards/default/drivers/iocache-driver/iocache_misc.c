@@ -133,8 +133,8 @@ static long iocache_misc_ioctl(struct file *file, unsigned int cmd, unsigned lon
         if (copy_to_user((void __user *)arg, &val, sizeof(val)))
             return -EFAULT;
         return 0;
-    } else if (cmd == IOCACHE_IOCTL_GET_CYCLES) {
-		u64 val[3] = {iocache->isr_cyc, iocache->entry_cyc, iocache->claim_cyc};
+    } else if (cmd == IOCACHE_IOCTL_GET_KTIMES) {
+		u64 val[3] = {iocache->entry_ktime, iocache->claim_ktime, iocache->isr_ktime};
 		
         if (copy_to_user((void __user *)arg, &val, sizeof(val)))
             return -EFAULT;

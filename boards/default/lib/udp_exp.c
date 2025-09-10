@@ -39,7 +39,6 @@ struct timespec timespec_diff(struct timespec *start, struct timespec *end);
 struct timespec test_udp_latency_block(struct accnet_info *accnet, struct iocache_info *iocache,
                                         uint8_t payload[], uint32_t payload_size, bool debug);
 struct timespec test_udp_latency_poll(struct accnet_info *accnet, uint8_t payload[], uint32_t payload_size, bool debug);
-void print_deltas(uint64_t t_user_before, __u64 last_cycles[3], uint64_t t_user_after);
 
 uint64_t time_ns[8] = {0};
 
@@ -221,9 +220,8 @@ int main(int argc, char **argv) {
 struct timespec test_udp_latency_block(struct accnet_info *accnet, struct iocache_info *iocache,
 uint8_t payload[], uint32_t payload_size, bool debug) 
 {
-    struct timespec before, mid, after;
-    __u64 last_irq_ns = 0;
-    __u64 last_cycles[3] = {0};
+    struct timespec before, after;
+    __u64 last_ktimes[3] = {0};
     int ret;
 
     /* Preparing to send the payload */
@@ -248,7 +246,7 @@ uint8_t payload[], uint32_t payload_size, bool debug)
     mmio_wmb();
 
     /* Waiting for RX */
-    ret = iocache_wait_on_rx(iocache, &mid);
+    ret = iocache_wait_on_rx(iocache);
     uint64_t t_user_after = 0;
     clock_gettime(CLOCK_MONOTONIC, &after);
 
@@ -260,20 +258,19 @@ uint8_t payload[], uint32_t payload_size, bool debug)
     if (ret == -1) return (struct timespec){0, 0};
 
     /* IRQ timestamp */
-    if (iocache_get_last_irq_ns(iocache, &last_irq_ns) == 0 && iocache_get_last_cycles(iocache, last_cycles) == 0) {
+    if (iocache_get_last_ktimes(iocache, last_ktimes) == 0) {
         struct timespec irq_ts, plic_ts, entry_ts, diff1, diff2, diff3, diff4, diff5;
-        irq_ts.tv_sec  = last_irq_ns / 1000000000ULL;
-        irq_ts.tv_nsec = last_irq_ns % 1000000000ULL;
-        entry_ts.tv_sec  = last_cycles[1] / 1000000000ULL;
-        entry_ts.tv_nsec = last_cycles[1] % 1000000000ULL;
-        plic_ts.tv_sec  = last_cycles[2] / 1000000000ULL;
-        plic_ts.tv_nsec = last_cycles[2] % 1000000000ULL;
+        entry_ts.tv_sec  = last_ktimes[0] / 1000000000ULL;
+        entry_ts.tv_nsec = last_ktimes[0] % 1000000000ULL;
+        plic_ts.tv_sec  = last_ktimes[1] / 1000000000ULL;
+        plic_ts.tv_nsec = last_ktimes[1] % 1000000000ULL;
+        irq_ts.tv_sec  = last_ktimes[2] / 1000000000ULL;
+        irq_ts.tv_nsec = last_ktimes[2] % 1000000000ULL;
 
         diff1 = timespec_diff(&before, &entry_ts);
         diff2 = timespec_diff(&entry_ts, &plic_ts);
         diff3 = timespec_diff(&plic_ts, &irq_ts);
-        diff4 = timespec_diff(&irq_ts, &mid);
-        diff5 = timespec_diff(&mid, &after);
+        diff4 = timespec_diff(&irq_ts, &after);
 
         // printf("    IRQ-Before:     %lld.%09ld\n", (long long)diff1.tv_sec, diff1.tv_nsec);
         // printf("    PreRead-IRQ:    %lld.%09ld\n", (long long)diff2.tv_sec, diff2.tv_nsec);
@@ -283,9 +280,8 @@ uint8_t payload[], uint32_t payload_size, bool debug)
         time_ns[1] += diff2.tv_sec * 1e9 + diff2.tv_nsec;
         time_ns[2] += diff3.tv_sec * 1e9 + diff3.tv_nsec;
         time_ns[3] += diff4.tv_sec * 1e9 + diff4.tv_nsec;
-        time_ns[4] += diff5.tv_sec * 1e9 + diff5.tv_nsec;
     } else {
-        printf("Either 'iocache_get_last_irq_ns' or 'iocache_get_last_cycles' failed\n");
+        printf("Either 'iocache_get_last_irq_ns' or 'iocache_get_last_ktimes' failed\n");
     }
 
     return timespec_diff(&before, &after);
@@ -378,37 +374,4 @@ struct timespec timespec_diff(struct timespec *start, struct timespec *end) {
         temp.tv_nsec += 1000000000L;
     }
     return temp;
-}
-
-void print_deltas(uint64_t t_user_before,
-                  __u64 last_cycles[3],
-                  uint64_t t_user_after)
-{
-    double ns_per_cyc = 1e9 / 60e6;   // ~16.67 ns per cycle
-
-    uint64_t d_user_doirq   = last_cycles[0] - t_user_before;
-    uint64_t d_doirq_claim  = last_cycles[1] - last_cycles[0];
-    uint64_t d_claim_isr    = last_cycles[2] - last_cycles[1];
-    uint64_t d_isr_user     = t_user_after   - last_cycles[2];
-    uint64_t d_user_user    = t_user_after   - t_user_before;
-
-    // printf("user→do_irq:   %8llu cycles (~%.2f us)\n",
-    //        (unsigned long long)d_user_doirq,
-    //        d_user_doirq * ns_per_cyc / 1000.0);
-
-    // printf("do_irq→claim:  %8llu cycles (~%.2f us)\n",
-    //        (unsigned long long)d_doirq_claim,
-    //        d_doirq_claim * ns_per_cyc / 1000.0);
-
-    // printf("claim→ISR:     %8llu cycles (~%.2f us)\n",
-    //        (unsigned long long)d_claim_isr,
-    //        d_claim_isr * ns_per_cyc / 1000.0);
-
-    // printf("ISR→user:      %8llu cycles (~%.2f us)\n",
-    //        (unsigned long long)d_isr_user,
-    //        d_isr_user * ns_per_cyc / 1000.0);
-
-    printf("user→user:     %8llu cycles (~%.2f us)\n",
-           (unsigned long long)d_user_user,
-           d_user_user * ns_per_cyc / 1000.0);
 }

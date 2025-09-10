@@ -7,6 +7,10 @@
 #include <sys/socket.h>
 #include <stdatomic.h>
 
+#ifndef CLOCK_MONOTONIC
+#define CLOCK_MONOTONIC 1
+#endif
+
 #define reg_read64(base, reg) (((volatile uint64_t *)(base))[(reg)/8])
 #define reg_write64(base, reg, val) (((volatile uint64_t *)(base))[(reg)/8]) = val
 
