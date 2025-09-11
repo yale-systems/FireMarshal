@@ -54,6 +54,10 @@ static void pin_to_cpu0(void) {
     if (sched_setaffinity(0, sizeof(set), &set) != 0) {
         perror("sched_setaffinity"); /* continue anyway */
     }
+
+    struct sched_param sp = { .sched_priority = 10 }; // SCHED_FIFO 1..99
+    sched_setscheduler(0, SCHED_FIFO, &sp);
+    mlockall(MCL_CURRENT|MCL_FUTURE);
 }
 
 int main(int argc, char **argv) {
@@ -63,6 +67,7 @@ int main(int argc, char **argv) {
     char *iocache_filename = "/dev/iocache-misc";
     int n_tests = 64;
     bool debug = false;
+    bool print_all = false;
     uint32_t payload_size = 32*1024;
     char *src_ip = "10.0.0.2";
     char *src_mac = "0c:42:a1:a8:2d:e6";
@@ -79,7 +84,7 @@ int main(int argc, char **argv) {
                 "[--payload-size BYTES] "
                 "[--src-ip ADDR] [--src-port PORT] "
                 "[--dst-ip ADDR] [--dst-port PORT] "
-                "[--debug]\n", argv[0]);
+                "[--debug] [--print-all]\n", argv[0]);
             return 0;
         }
         else if (strcmp(argv[i], "--ntest") == 0 && i + 1 < argc) {
@@ -133,6 +138,10 @@ int main(int argc, char **argv) {
             debug = true;
             printf("Parsed --debug\n");
         }
+        else if (strcmp(argv[i], "--print-all") == 0) {
+            print_all = true;
+            printf("Parsed --print-all\n");
+        }
         else {
             fprintf(stderr, "Unknown argument: %s\n", argv[i]);
             return 1;
@@ -141,6 +150,7 @@ int main(int argc, char **argv) {
 
     struct accnet_info *accnet = malloc(sizeof(struct accnet_info));
     struct iocache_info *iocache = calloc(1, sizeof(*iocache));
+    long long *rtts = malloc(sizeof(long long) * n_tests);
 
     if (accnet_open(accnet_filename, accnet, true) < 0) {
         fprintf(stderr, "accnet_open failed\n"); 
@@ -195,18 +205,27 @@ int main(int argc, char **argv) {
             if (rtt_ns > max_ns) max_ns = rtt_ns;
         }
         sum_ns += rtt_ns;
+        rtts[i] = rtt_ns;
         ++received_ok;
         // printf("iter=%d rtt=%.3f us\n", i, rtt_ns / 1e3);
     }
     double avg_us = (sum_ns / (double)received_ok) / 1e3;
     printf("\nResults (%s): recv=%d/%d  min=%.3f us  avg=%.3f us  max=%.3f us\n",
                 mode, received_ok, n_tests, min_ns/1e3, avg_us, max_ns/1e3);
-    printf("Time breakdown average:\nEntry-Before: %.3f us\nPLIC-Entry: %.3f us\nIRQ-PLIC: %.3f us\nPreRead-IRQ: %.3f us\nAfter-PreRead: %.3f us\n",
+    printf("Time breakdown average:\nEntry-Before: %.3f us\nPLIC-Entry: %.3f us\nIRQ-PLIC: %.3f us\n"
+        "Syscall-IRQ: %.3f us\nAfter-Syscall: %.3f us\n",
             time_ns[0]/(double)received_ok/1e3, 
             time_ns[1]/(double)received_ok/1e3, 
             time_ns[2]/(double)received_ok/1e3, 
-            time_ns[3]/(double)received_ok/1e3, 
-            time_ns[4]/(double)received_ok/1e3);
+            time_ns[3]/(double)received_ok/1e3,
+            time_ns[4]/(double)received_ok/1e3
+        );
+
+    if (print_all) {
+        for (int i = 0; i < n_tests; i++) {
+            printf("iter=%d rtt=%.3f us\n", i, rtts[i] / 1e3);
+        }
+    }
 
     /* Close Accnet */
     accnet_close(accnet);
@@ -221,7 +240,7 @@ struct timespec test_udp_latency_block(struct accnet_info *accnet, struct iocach
 uint8_t payload[], uint32_t payload_size, bool debug) 
 {
     struct timespec before, after;
-    __u64 last_ktimes[3] = {0};
+    __u64 last_ktimes[5] = {0};
     int ret;
 
     /* Preparing to send the payload */
@@ -241,13 +260,11 @@ uint8_t payload[], uint32_t payload_size, bool debug)
     uint32_t new_tx_tail = (tx_tail + payload_size) % accnet->udp_tx_size;
 
     clock_gettime(CLOCK_MONOTONIC, &before);
-    uint64_t t_user_before = 0;
     reg_write32(accnet->udp_tx_regs, ACCNET_UDP_TX_RING_TAIL, new_tx_tail);
     mmio_wmb();
 
     /* Waiting for RX */
     ret = iocache_wait_on_rx(iocache);
-    uint64_t t_user_after = 0;
     clock_gettime(CLOCK_MONOTONIC, &after);
 
     /* Updating RX HEAD */
@@ -259,27 +276,27 @@ uint8_t payload[], uint32_t payload_size, bool debug)
 
     /* IRQ timestamp */
     if (iocache_get_last_ktimes(iocache, last_ktimes) == 0) {
-        struct timespec irq_ts, plic_ts, entry_ts, diff1, diff2, diff3, diff4, diff5;
+        struct timespec irq_ts, plic_ts, entry_ts, awake_ts, diff1, diff2, diff3, diff4, diff5;
         entry_ts.tv_sec  = last_ktimes[0] / 1000000000ULL;
         entry_ts.tv_nsec = last_ktimes[0] % 1000000000ULL;
         plic_ts.tv_sec  = last_ktimes[1] / 1000000000ULL;
         plic_ts.tv_nsec = last_ktimes[1] % 1000000000ULL;
         irq_ts.tv_sec  = last_ktimes[2] / 1000000000ULL;
         irq_ts.tv_nsec = last_ktimes[2] % 1000000000ULL;
+        awake_ts.tv_sec  = last_ktimes[3] / 1000000000ULL;
+        awake_ts.tv_nsec = last_ktimes[3] % 1000000000ULL;
 
         diff1 = timespec_diff(&before, &entry_ts);
         diff2 = timespec_diff(&entry_ts, &plic_ts);
         diff3 = timespec_diff(&plic_ts, &irq_ts);
-        diff4 = timespec_diff(&irq_ts, &after);
-
-        // printf("    IRQ-Before:     %lld.%09ld\n", (long long)diff1.tv_sec, diff1.tv_nsec);
-        // printf("    PreRead-IRQ:    %lld.%09ld\n", (long long)diff2.tv_sec, diff2.tv_nsec);
-        // printf("    After-PreRead:  %lld.%09ld\n", (long long)diff3.tv_sec, diff3.tv_nsec);
+        diff4 = timespec_diff(&irq_ts, &awake_ts);
+        diff5 = timespec_diff(&awake_ts, &after);
 
         time_ns[0] += diff1.tv_sec * 1e9 + diff1.tv_nsec;
         time_ns[1] += diff2.tv_sec * 1e9 + diff2.tv_nsec;
         time_ns[2] += diff3.tv_sec * 1e9 + diff3.tv_nsec;
         time_ns[3] += diff4.tv_sec * 1e9 + diff4.tv_nsec;
+        time_ns[4] += diff5.tv_sec * 1e9 + diff5.tv_nsec;
     } else {
         printf("Either 'iocache_get_last_irq_ns' or 'iocache_get_last_ktimes' failed\n");
     }

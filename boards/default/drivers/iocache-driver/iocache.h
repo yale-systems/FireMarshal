@@ -97,7 +97,7 @@ struct iocache_device {
 	void __iomem *plic_base;
 
 	struct u64_stats_sync syncp;
-    u64 last_irq_ns, isr_ktime, entry_ktime, claim_ktime;
+    u64 isr_ktime, entry_ktime, claim_ktime;
 
 	wait_queue_head_t wq;
     atomic_t ready; 

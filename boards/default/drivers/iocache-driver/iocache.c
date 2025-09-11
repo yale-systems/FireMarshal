@@ -25,6 +25,11 @@
 #include <linux/dma-mapping.h>
 #include <linux/miscdevice.h>
 
+#include <linux/interrupt.h>
+#include <linux/sched.h>
+#include <linux/sched/task.h>   // current
+#include <linux/smp.h>          // smp_processor_id(), smp_send_reschedule()
+
 #include "iocache.h"
 #include "iocache_ioctl.h"
 #include "iocache_misc.c"
@@ -73,20 +78,19 @@ static irqreturn_t iocache_isr_rx(int irq, void *data) {
 	struct iocache_device *iocache = data;
 
 	// save timestamp
-	u64 now = ktime_get_mono_fast_ns();   // OK in hard IRQ
-    iocache->last_irq_ns = now;
-
-	iocache->isr_ktime   = now;
     iocache->entry_ktime = riscv_get_irq_entry_ktime();
     iocache->claim_ktime = riscv_get_plic_claim_ktime();
 
 	clear_intmask_rx(iocache, IOCACHE_INTMASK_RX);
 
 	/* Update shared state first, then wake */
-    atomic_set(&iocache->ready, 1);
+    raw_atomic_set(&iocache->ready, 1);
 
     /* Safe from hard IRQ context */
     wake_up_interruptible(&iocache->wq);
+
+	u64 now = ktime_get_mono_fast_ns();   // OK in hard IRQ
+	iocache->isr_ktime   = now;
 
     return IRQ_HANDLED;
 }

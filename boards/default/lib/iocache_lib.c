@@ -92,7 +92,6 @@ static inline void iocache_clear_txcomp_suspended(struct iocache_info *iocache) 
 int iocache_wait_on_rx(struct iocache_info *iocache) { 
     struct epoll_event out;
     uint64_t cnt;
-    int rc;
 
     if (iocache_is_rx_available(iocache))
         return 0;
@@ -100,18 +99,16 @@ int iocache_wait_on_rx(struct iocache_info *iocache) {
     iocache_set_rx_suspended(iocache);
     _iocache_enable_interrupts_rx(iocache);
 
-    if (ioctl(iocache->fd, IOCACHE_IOCTL_WAIT_READY, &rc) == -1) {
+    if (ioctl(iocache->fd, IOCACHE_IOCTL_WAIT_READY) == -1) {
         iocache_clear_rx_suspended(iocache);
         perror("IOCACHE_IOCTL_WAIT_READY ioctl failed");
         return -1;
     } 
-    if (rc == 0) {
-        iocache_clear_rx_suspended(iocache);
-        return -1;
-    }
 
     iocache_clear_rx_suspended(iocache);
-    return 0;
+
+    /* We have to return -1 if it was a timeout */
+    return (iocache_is_rx_available(iocache)) ? 0 : -1;
 }
 
 int iocache_wait_on_txcomp(struct iocache_info *iocache) {

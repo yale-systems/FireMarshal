@@ -4,6 +4,7 @@
 #include <linux/mm.h>
 #include <asm/set_memory.h>
 #include <linux/eventfd.h>
+#include <linux/sched_ktime_taps.h>
 
 static int iocache_misc_open(struct inode *inode, struct file *file) {
     struct iocache_device *iocache = container_of(file->private_data, struct iocache_device, misc_dev);
@@ -127,14 +128,9 @@ static long iocache_misc_ioctl(struct file *file, unsigned int cmd, unsigned lon
 
         if (old) eventfd_ctx_put(old);
         return 0;
-    } else if (cmd == IOCACHE_IOCTL_GET_LAST_IRQ_NS) {
-		u64 val = iocache->last_irq_ns;
-		
-        if (copy_to_user((void __user *)arg, &val, sizeof(val)))
-            return -EFAULT;
-        return 0;
     } else if (cmd == IOCACHE_IOCTL_GET_KTIMES) {
-		u64 val[3] = {iocache->entry_ktime, iocache->claim_ktime, iocache->isr_ktime};
+		u64 now = ktime_get_mono_fast_ns();
+		u64 val[4] = {iocache->entry_ktime, iocache->claim_ktime, iocache->isr_ktime, now};
 		
         if (copy_to_user((void __user *)arg, &val, sizeof(val)))
             return -EFAULT;
@@ -146,9 +142,6 @@ static long iocache_misc_ioctl(struct file *file, unsigned int cmd, unsigned lon
 					msecs_to_jiffies(1000));
 		
 		atomic_set(&iocache->ready, 0); // reset
-
-		if (copy_to_user((void __user *)arg, &ret, sizeof(ret)))
-            return -EFAULT;
 
 		return 0;
 	}

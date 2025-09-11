@@ -5,10 +5,13 @@ Make files executable:
 chmod +x udp_* interrupt_exp
 ```
 
-(Optional) Pin AccNIC's interrupts to CPU 0. You may use `echo f >` to assign them to all cores.
+(Optional) Pin AccNIC's interrupts to CPU 0. You may use `echo '0-3' >` to assign them to all cores.
 ```shell
-echo 1 > /proc/irq/14/smp_affinity
-echo 1 > /proc/irq/15/smp_affinity
+echo 2 | tee /proc/irq/12/smp_affinity_list # console
+echo 1 | tee /proc/irq/16/smp_affinity_list # accnet
+echo 1 | tee /proc/irq/17/smp_affinity_list # accnet
+echo 0 | tee /proc/irq/14/smp_affinity_list # iocache
+echo 0 | tee /proc/irq/15/smp_affinity_list # iocache
 ```
 
 Running udp echo experiment with kernel `socket` implementation using AccNIC:
