@@ -78,16 +78,10 @@ static irqreturn_t iocache_isr_rx(int irq, void *data) {
 	struct iocache_device *iocache = data;
 
 	// save timestamp
-    iocache->entry_ktime = riscv_get_irq_entry_ktime();
-    iocache->claim_ktime = riscv_get_plic_claim_ktime();
+    // iocache->entry_ktime = riscv_get_irq_entry_ktime();
+    // iocache->claim_ktime = riscv_get_plic_claim_ktime();
 
 	clear_intmask_rx(iocache, IOCACHE_INTMASK_RX);
-
-	// /* Update shared state first, then wake */
-    // raw_atomic_set(&iocache->ready, 1);
-
-    // /* Safe from hard IRQ context */
-    // wake_up_interruptible(&iocache->wq);
 
 	/* Mark event first, then wake */
 	WRITE_ONCE(iocache->ready, 1);
@@ -99,13 +93,10 @@ static irqreturn_t iocache_isr_rx(int irq, void *data) {
 			WRITE_ONCE(tsk->__state, TASK_RUNNING);
 		}
 		set_tsk_need_resched(current);  
-
-		// if (likely(tsk))
-		// 	wake_up_process(tsk);   // IRQ-safe; enqueues + sets resched if needed
 	}
 
-	u64 now = ktime_get_mono_fast_ns();   // OK in hard IRQ
-	iocache->isr_ktime   = now;
+	// u64 now = ktime_get_mono_fast_ns();   // OK in hard IRQ
+	// iocache->isr_ktime   = now;
 
     return IRQ_HANDLED;
 }

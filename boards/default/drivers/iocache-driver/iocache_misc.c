@@ -170,21 +170,12 @@ static long iocache_misc_ioctl(struct file *file, unsigned int cmd, unsigned lon
             return -EFAULT;
         return 0;
     } else if (cmd == IOCACHE_IOCTL_WAIT_READY) {
-		// int ret = wait_event_interruptible_timeout(
-		// 			iocache->wq, 
-		// 			atomic_read(&iocache->ready) != 0,
-		// 			msecs_to_jiffies(1000));
-		
-		// iocache->syscall_time = ktime_get_mono_fast_ns();
-		// atomic_set(&iocache->ready, 0); // reset
-		// return 0;
-
-		long tout = msecs_to_jiffies(5000);
+		long tout = msecs_to_jiffies(2000);
 
 		/* Fast path: event already present */
 		if (READ_ONCE(iocache->ready)) {
 			WRITE_ONCE(iocache->ready, 0);
-			iocache->syscall_time = ktime_get_mono_fast_ns();
+			// iocache->syscall_time = ktime_get_mono_fast_ns();
 			return 0;
 		}
 
@@ -198,7 +189,7 @@ static long iocache_misc_ioctl(struct file *file, unsigned int cmd, unsigned lon
 			__set_current_state(TASK_RUNNING);
 			WRITE_ONCE(iocache->armed, 0);
 			WRITE_ONCE(iocache->ready, 0);
-			iocache->syscall_time = ktime_get_mono_fast_ns();
+			// iocache->syscall_time = ktime_get_mono_fast_ns();
 			return 0;
 		}
 
@@ -210,15 +201,13 @@ static long iocache_misc_ioctl(struct file *file, unsigned int cmd, unsigned lon
 		 * Device interrupt will set current to TASK_RUNNING and run this
 		 */
 		long left = schedule_timeout(tout);
-		// schedule();
+		// iocache->syscall_time = ktime_get_mono_fast_ns();
 
 		hrtimer_cancel(&iocache->to_hrtimer);
 
 		/* Running again: clean up publication on every path */
 		WRITE_ONCE(iocache->armed, 0);
 		WRITE_ONCE(iocache->ready, 0);
-
-		iocache->syscall_time = ktime_get_mono_fast_ns();
 		return 0;
 	}
 

@@ -46,8 +46,6 @@ int main() {
             continue;
         }
 
-        usleep(100);
-
         // printf("Received %zd bytes\n", n);
         if (n > 0) {
             // printf("First byte before: %u\n", buffer[0]);
