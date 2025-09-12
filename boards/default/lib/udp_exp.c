@@ -49,8 +49,15 @@ static inline uint64_t rdcycle(void)
     return x;
 }
 
-static void pin_to_cpu0(void) {
-    cpu_set_t set; CPU_ZERO(&set); CPU_SET(0, &set);
+static void pin_to_cpu(int cpu) {
+
+    long ncpu = sysconf(_SC_NPROCESSORS_CONF);
+    if (cpu < 0 || cpu >= ncpu) {
+        fprintf(stderr, "cpu %d out of range [0..%ld)\n", cpu, ncpu);
+        exit(1);
+    }
+
+    cpu_set_t set; CPU_ZERO(&set); CPU_SET(cpu, &set);
     if (sched_setaffinity(0, sizeof(set), &set) != 0) {
         perror("sched_setaffinity"); /* continue anyway */
     }
@@ -61,8 +68,7 @@ static void pin_to_cpu0(void) {
 }
 
 int main(int argc, char **argv) {
-    pin_to_cpu0();
-
+    int cpu = 0;
     char *accnet_filename = "/dev/accnet-misc";
     char *iocache_filename = "/dev/iocache-misc";
     int n_tests = 64;
@@ -79,13 +85,17 @@ int main(int argc, char **argv) {
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--help") == 0) {
-            printf("Usage: %s "
+            printf("Usage: %s [--cpu A]"
                 "[--ntest N] [--mode {" MODE_POLLING "|" MODE_BLOCKING "}]"
                 "[--payload-size BYTES] "
                 "[--src-ip ADDR] [--src-port PORT] "
                 "[--dst-ip ADDR] [--dst-port PORT] "
                 "[--debug] [--print-all]\n", argv[0]);
             return 0;
+        }
+        else if (strcmp(argv[i], "--cpu") == 0 && i + 1 < argc) {
+            cpu = atoi(argv[++i]);
+            printf("Parsed --cpu = %d\n", cpu);
         }
         else if (strcmp(argv[i], "--ntest") == 0 && i + 1 < argc) {
             n_tests = atoi(argv[++i]);
@@ -147,6 +157,8 @@ int main(int argc, char **argv) {
             return 1;
         }
     }
+
+    pin_to_cpu(cpu);
 
     struct accnet_info *accnet = malloc(sizeof(struct accnet_info));
     struct iocache_info *iocache = calloc(1, sizeof(*iocache));

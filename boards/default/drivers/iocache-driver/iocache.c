@@ -83,11 +83,26 @@ static irqreturn_t iocache_isr_rx(int irq, void *data) {
 
 	clear_intmask_rx(iocache, IOCACHE_INTMASK_RX);
 
-	/* Update shared state first, then wake */
-    raw_atomic_set(&iocache->ready, 1);
+	// /* Update shared state first, then wake */
+    // raw_atomic_set(&iocache->ready, 1);
 
-    /* Safe from hard IRQ context */
-    wake_up_interruptible(&iocache->wq);
+    // /* Safe from hard IRQ context */
+    // wake_up_interruptible(&iocache->wq);
+
+	/* Mark event first, then wake */
+	WRITE_ONCE(iocache->ready, 1);
+
+	/* Only try to wake when process armed itself */
+	if (READ_ONCE(iocache->armed)) {
+		struct task_struct *tsk = READ_ONCE(iocache->wait_task);
+		if (likely(tsk)) {
+			WRITE_ONCE(tsk->__state, TASK_RUNNING);
+		}
+		set_tsk_need_resched(current);  
+
+		// if (likely(tsk))
+		// 	wake_up_process(tsk);   // IRQ-safe; enqueues + sets resched if needed
+	}
 
 	u64 now = ktime_get_mono_fast_ns();   // OK in hard IRQ
 	iocache->isr_ktime   = now;
@@ -195,8 +210,13 @@ static int iocache_probe(struct platform_device *pdev) {
 
 	spin_lock_init(&iocache->ev_lock);
 	u64_stats_init(&iocache->syncp);
-	init_waitqueue_head(&iocache->wq);
-    atomic_set(&iocache->ready, 0);
+
+	// init_waitqueue_head(&iocache->wq);
+    // atomic_set(&iocache->ready, 0);
+
+	WRITE_ONCE(iocache->ready, 0);
+	WRITE_ONCE(iocache->wait_task, NULL);
+	WRITE_ONCE(iocache->armed, 0);
 
 	// plic_unregister_fast_path(iocache);
 	if ((ret = plic_register_fast_path(iocache, iocache_isr_rx, iocache_isr_txcomp)) != 0)

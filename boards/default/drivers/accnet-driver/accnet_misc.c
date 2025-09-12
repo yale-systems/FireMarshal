@@ -137,7 +137,7 @@ static int accnet_misc_mmap(struct file *filp, struct vm_area_struct *vma)
 	if ((vma->vm_flags & VM_SHARED) == 0)
 		return -EINVAL;
 
-	pr_info("mmap: pgoff=%#lx size=%#lx\n", vma->vm_pgoff, vma->vm_end - vma->vm_start);
+	// pr_info("mmap: pgoff=%#lx size=%#lx\n", vma->vm_pgoff, vma->vm_end - vma->vm_start);
 
     switch (index) {
     case 0: { /* control MMIO */
@@ -165,8 +165,8 @@ static int accnet_misc_mmap(struct file *filp, struct vm_area_struct *vma)
 				req_len, pgprot_noncached(vma->vm_page_prot));
     }
     case 3: { /* UDP TX DMA buffer (coherent) */
-		pr_info("udp_tx: cpu=%p dma=%p len=%#zx\n",
-            nic->dma_region_udp_tx, &nic->dma_region_addr_udp_tx, nic->dma_region_len_udp_tx);
+		// pr_info("udp_tx: cpu=%p dma=%p len=%#zx\n",
+        //     nic->dma_region_udp_tx, &nic->dma_region_addr_udp_tx, nic->dma_region_len_udp_tx);
 
         phys = virt_to_phys(nic->dma_region_udp_tx);  // Convert virtual to physical address
         psize = nic->dma_region_len_udp_tx;
@@ -184,8 +184,8 @@ static int accnet_misc_mmap(struct file *filp, struct vm_area_struct *vma)
 		return dma_mmap_coherent(nic->dev, vma, nic->dma_region_udp_tx, nic->dma_region_addr_udp_tx, req_len);
     }
     case 4: { /* UDP RX DMA buffer (coherent) */
-		pr_info("udp_rx: cpu=%p dma=%p len=%#zx\n",
-            nic->dma_region_udp_rx, &nic->dma_region_addr_udp_rx, nic->dma_region_len_udp_rx);
+		// pr_info("udp_rx: cpu=%p dma=%p len=%#zx\n",
+        //     nic->dma_region_udp_rx, &nic->dma_region_addr_udp_rx, nic->dma_region_len_udp_rx);
 
         phys = virt_to_phys(nic->dma_region_udp_rx);  // Convert virtual to physical address
         psize = nic->dma_region_len_udp_rx;

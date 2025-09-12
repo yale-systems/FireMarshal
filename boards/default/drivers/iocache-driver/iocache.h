@@ -97,10 +97,19 @@ struct iocache_device {
 	void __iomem *plic_base;
 
 	struct u64_stats_sync syncp;
-    u64 isr_ktime, entry_ktime, claim_ktime;
+    u64 isr_ktime, entry_ktime, claim_ktime, syscall_time;
 
 	wait_queue_head_t wq;
-    atomic_t ready; 
+    // atomic_t ready; 
+
+    int ready;                       // 0/1 (or make it an event counter later)
+    struct task_struct *wait_task;   // published waiter
+    int armed;                       // 0/1: only wake when armed
+
+	struct completion ready_comp;
+
+	struct hrtimer to_hrtimer;
+    ktime_t to_period;    // e.g., KTIME_MS(1)
 };
 
 static int iocache_misc_open(struct inode *inode, struct file *filp);

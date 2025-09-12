@@ -4,7 +4,21 @@
 #include <linux/mm.h>
 #include <asm/set_memory.h>
 #include <linux/eventfd.h>
-#include <linux/sched_ktime_taps.h>
+
+static enum hrtimer_restart iocache_timeout_cb(struct hrtimer *t)
+{
+    struct iocache_device *iocache = container_of(t, struct iocache_device, to_hrtimer);
+    struct task_struct *tsk = READ_ONCE(iocache->wait_task);
+
+    /* Arm state may have been cleared by the fast path */
+    if (READ_ONCE(iocache->armed) && tsk) {
+        WRITE_ONCE(tsk->__state, TASK_PARKED);
+		sched_force_next_local(tsk);
+        set_tsk_need_resched(current);  /* resched on this CPU after IRQ/softirq */
+    }
+    return HRTIMER_NORESTART;
+}
+
 
 static int iocache_misc_open(struct inode *inode, struct file *file) {
     struct iocache_device *iocache = container_of(file->private_data, struct iocache_device, misc_dev);
@@ -18,12 +32,24 @@ static int iocache_misc_open(struct inode *inode, struct file *file) {
 
     file->private_data = iocache;
 
+	/* Publish waiter then arm ISR wake; order matters */
+	sched_force_next_local(current);
+	WRITE_ONCE(iocache->wait_task, current);
+	smp_wmb();                      // publish tsk before arming
+
+	hrtimer_init(&iocache->to_hrtimer, CLOCK_MONOTONIC, HRTIMER_MODE_REL_PINNED);
+	iocache->to_hrtimer.function = iocache_timeout_cb;
+	iocache->to_period = ktime_set(1, 0); // 1 second 
+
     return 0;
 }
 
 static int iocache_misc_release(struct inode *inode, struct file *filp)
 {
     struct iocache_device *iocache = filp->private_data;
+	WRITE_ONCE(iocache->wait_task, NULL);
+	smp_wmb();                      // publish tsk before arming
+
     if (iocache) {
         struct eventfd_ctx *old = NULL;
         spin_lock(&iocache->ev_lock);
@@ -32,6 +58,15 @@ static int iocache_misc_release(struct inode *inode, struct file *filp)
         spin_unlock(&iocache->ev_lock);
         if (old) eventfd_ctx_put(old);
     }
+
+	/* 
+	 * We need it to end a process correctly by readding it to ready queues. 
+	 * We call schedule() in TASK_IOCACHE_SPECIAL that will automatically add our process to linux queues 
+	 * and unsets force_next_local.
+	 */
+	__set_current_state(TASK_IOCACHE_SPECIAL);
+	schedule();
+
     return 0;
 }
 
@@ -129,22 +164,64 @@ static long iocache_misc_ioctl(struct file *file, unsigned int cmd, unsigned lon
         if (old) eventfd_ctx_put(old);
         return 0;
     } else if (cmd == IOCACHE_IOCTL_GET_KTIMES) {
-		u64 now = ktime_get_mono_fast_ns();
-		u64 val[4] = {iocache->entry_ktime, iocache->claim_ktime, iocache->isr_ktime, now};
+		u64 val[4] = {iocache->entry_ktime, iocache->claim_ktime, iocache->isr_ktime, iocache->syscall_time};
 		
         if (copy_to_user((void __user *)arg, &val, sizeof(val)))
             return -EFAULT;
         return 0;
     } else if (cmd == IOCACHE_IOCTL_WAIT_READY) {
-		int ret = wait_event_interruptible_timeout(
-					iocache->wq, 
-					atomic_read(&iocache->ready) != 0,
-					msecs_to_jiffies(1000));
+		// int ret = wait_event_interruptible_timeout(
+		// 			iocache->wq, 
+		// 			atomic_read(&iocache->ready) != 0,
+		// 			msecs_to_jiffies(1000));
 		
-		atomic_set(&iocache->ready, 0); // reset
+		// iocache->syscall_time = ktime_get_mono_fast_ns();
+		// atomic_set(&iocache->ready, 0); // reset
+		// return 0;
 
+		long tout = msecs_to_jiffies(5000);
+
+		/* Fast path: event already present */
+		if (READ_ONCE(iocache->ready)) {
+			WRITE_ONCE(iocache->ready, 0);
+			iocache->syscall_time = ktime_get_mono_fast_ns();
+			return 0;
+		}
+
+		/* Prepare to sleep (interruptible) */
+		set_current_state(TASK_INTERRUPTIBLE);
+
+		WRITE_ONCE(iocache->armed, 1);
+
+		/* Recheck after arming to avoid lost wake between checks */
+		if (READ_ONCE(iocache->ready)) {
+			__set_current_state(TASK_RUNNING);
+			WRITE_ONCE(iocache->armed, 0);
+			WRITE_ONCE(iocache->ready, 0);
+			iocache->syscall_time = ktime_get_mono_fast_ns();
+			return 0;
+		}
+
+		/* Start a pinned hrtimer for the timeout on this CPU */
+    	hrtimer_start(&iocache->to_hrtimer, iocache->to_period, HRTIMER_MODE_REL_PINNED);
+
+		/* Sleep;
+		 * Timeout will wake us via wake_up_process()
+		 * Device interrupt will set current to TASK_RUNNING and run this
+		 */
+		long left = schedule_timeout(tout);
+		// schedule();
+
+		hrtimer_cancel(&iocache->to_hrtimer);
+
+		/* Running again: clean up publication on every path */
+		WRITE_ONCE(iocache->armed, 0);
+		WRITE_ONCE(iocache->ready, 0);
+
+		iocache->syscall_time = ktime_get_mono_fast_ns();
 		return 0;
 	}
+
 	return -EINVAL;
 }
 
@@ -165,7 +242,7 @@ static int iocache_misc_mmap(struct file *file, struct vm_area_struct *vma) {
 	if ((vma->vm_flags & VM_SHARED) == 0)
 		return -EINVAL;
 
-	pr_info("mmap: pgoff=%#lx size=%#lx\n", vma->vm_pgoff, vma->vm_end - vma->vm_start);
+	// pr_info("mmap: pgoff=%#lx size=%#lx\n", vma->vm_pgoff, vma->vm_end - vma->vm_start);
 
     switch (index) {
     case 0: { /* control MMIO */
