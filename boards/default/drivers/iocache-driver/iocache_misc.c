@@ -197,11 +197,11 @@ static long iocache_misc_ioctl(struct file *file, unsigned int cmd, unsigned lon
             return -EFAULT;
         return 0;
     } else if (cmd == IOCACHE_IOCTL_GET_PROC_UTIL) {
-		u64 usage;
+		// u64 usage;
 
-		rcu_read_lock();
-		usage = READ_ONCE(current->my_oncpu_total_ns);
-		rcu_read_unlock();
+		// rcu_read_lock();
+		// usage = READ_ONCE(current->my_oncpu_total_ns);
+		// rcu_read_unlock();
 
 		u64 val[3] = {0};
 
