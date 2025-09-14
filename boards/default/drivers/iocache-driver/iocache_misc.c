@@ -8,15 +8,7 @@
 #include <linux/sched/clock.h>
 #include <linux/preempt.h>
 #include <linux/smp.h> 
-
-static inline u64 now_sched_clock_cpu(void)
-{
-    u64 ns;
-    preempt_disable_notrace();
-    ns = sched_clock_cpu(raw_smp_processor_id());   // per-CPU, ns
-    preempt_enable_notrace();
-    return ns;
-}
+#include <linux/console.h>
 
 static enum hrtimer_restart iocache_timeout_cb(struct hrtimer *t)
 {
@@ -35,13 +27,9 @@ static enum hrtimer_restart iocache_timeout_cb(struct hrtimer *t)
     return HRTIMER_NORESTART;
 }
 
-u64 start, end;
-
 static int iocache_misc_open(struct inode *inode, struct file *file) {
     struct iocache_device *iocache = container_of(file->private_data, struct iocache_device, misc_dev);
 
-	start = sched_clock();
-	
 	// Sanity check
 	if (iocache->magic != MAGIC_CHAR) {
 		pr_err("iocache inode 0x%lx magic mismatch 0x%lx\n", 
@@ -62,6 +50,23 @@ static int iocache_misc_open(struct inode *inode, struct file *file) {
 
     return 0;
 }
+
+// static void iocache_print_cpu_util(void) {
+// 	u64 usage, dur, pct_x10;
+
+// 	rcu_read_lock();
+// 	usage = READ_ONCE(current->my_oncpu_total_ns);
+// 	dur = READ_ONCE(current->my_oncpu_wall_ns);
+// 	rcu_read_unlock();
+
+// 	pct_x10 = dur ? mul_u64_u32_div(usage, 1000, dur) : 0;  /* = percent * 10 */
+
+// 	console_lock(); 
+// 	pr_info("\n*** Process utilization: %llu.%01llu %%\n",
+// 		(unsigned long long)(pct_x10 / 10),
+// 		(unsigned long long)(pct_x10 % 10));
+// 	console_unlock();
+// } 
 
 static int iocache_misc_release(struct inode *inode, struct file *filp)
 {
@@ -86,6 +91,8 @@ static int iocache_misc_release(struct inode *inode, struct file *filp)
 	 */
 	__set_current_state(TASK_IOCACHE_SPECIAL);
 	schedule();
+
+	// iocache_print_cpu_util();
 
     return 0;
 }
@@ -191,13 +198,12 @@ static long iocache_misc_ioctl(struct file *file, unsigned int cmd, unsigned lon
         return 0;
     } else if (cmd == IOCACHE_IOCTL_GET_PROC_UTIL) {
 		u64 usage;
-		end = sched_clock();
 
 		rcu_read_lock();
 		usage = READ_ONCE(current->my_oncpu_total_ns);
 		rcu_read_unlock();
 
-		u64 val[3] = {start, end, usage};
+		u64 val[3] = {0};
 
         if (copy_to_user((void __user *)arg, &val, sizeof(val)))
             return -EFAULT;

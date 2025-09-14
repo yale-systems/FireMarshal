@@ -20,6 +20,7 @@
 #include <stdbool.h>
 #include <time.h>
 #include <sched.h>
+#include <termios.h>
 
 #include "common.h"
 #include "accnet_ioctl.h"
@@ -62,9 +63,9 @@ static void pin_to_cpu(int cpu) {
         perror("sched_setaffinity"); /* continue anyway */
     }
 
-    struct sched_param sp = { .sched_priority = 10 }; // SCHED_FIFO 1..99
-    sched_setscheduler(0, SCHED_FIFO, &sp);
-    mlockall(MCL_CURRENT|MCL_FUTURE);
+    // struct sched_param sp = { .sched_priority = 10 }; // SCHED_FIFO 1..99
+    // sched_setscheduler(0, SCHED_FIFO, &sp);
+    // mlockall(MCL_CURRENT|MCL_FUTURE);
 }
 
 int main(int argc, char **argv) {
@@ -95,16 +96,16 @@ int main(int argc, char **argv) {
         }
         else if (strcmp(argv[i], "--cpu") == 0 && i + 1 < argc) {
             cpu = atoi(argv[++i]);
-            printf("Parsed --cpu = %d\n", cpu);
+            // printf("Parsed --cpu = %d\n", cpu);
         }
         else if (strcmp(argv[i], "--ntest") == 0 && i + 1 < argc) {
             n_tests = atoi(argv[++i]);
-            printf("Parsed --ntest = %d\n", n_tests);
+            // printf("Parsed --ntest = %d\n", n_tests);
         }
         else if (strcmp(argv[i], "--mode") == 0 && i + 1 < argc) {
             mode = argv[++i];
             if (strcmp(mode, MODE_POLLING) == 0 || strcmp(mode, MODE_BLOCKING) == 0) {
-                printf("Parsed --mode = %s\n", mode);
+                // printf("Parsed --mode = %s\n", mode);
             }
             else {
                 fprintf(stderr, "Invalid mode (options: " MODE_POLLING ", " MODE_BLOCKING ")\n");
@@ -118,45 +119,46 @@ int main(int argc, char **argv) {
                 return -1;
             }
             payload_size = (uint32_t) val;
-            printf("Parsed --payload-size = %d\n", payload_size);
+            // printf("Parsed --payload-size = %d\n", payload_size);
         }
         else if (strcmp(argv[i], "--src-mac") == 0 && i + 1 < argc) {
             src_mac = argv[++i];
-            printf("Parsed --src-mac = %s\n", src_mac);
+            // printf("Parsed --src-mac = %s\n", src_mac);
         }
         else if (strcmp(argv[i], "--src-ip") == 0 && i + 1 < argc) {
             src_ip = argv[++i];
-            printf("Parsed --src-ip = %s\n", src_ip);
+            // printf("Parsed --src-ip = %s\n", src_ip);
         }
         else if (strcmp(argv[i], "--src-port") == 0 && i + 1 < argc) {
             src_port = (uint16_t) atoi(argv[++i]);
-            printf("Parsed --src-port = %u\n", src_port);
+            // printf("Parsed --src-port = %u\n", src_port);
         }
         else if (strcmp(argv[i], "--dst-mac") == 0 && i + 1 < argc) {
             dst_mac = argv[++i];
-            printf("Parsed --dst-mac = %s\n", dst_mac);
+            // printf("Parsed --dst-mac = %s\n", dst_mac);
         }
         else if (strcmp(argv[i], "--dst-ip") == 0 && i + 1 < argc) {
             dst_ip = argv[++i];
-            printf("Parsed --dst-ip = %s\n", dst_ip);
+            // printf("Parsed --dst-ip = %s\n", dst_ip);
         }
         else if (strcmp(argv[i], "--dst-port") == 0 && i + 1 < argc) {
             dst_port = (uint16_t) atoi(argv[++i]);
-            printf("Parsed --dst-port = %u\n", dst_port);
+            // printf("Parsed --dst-port = %u\n", dst_port);
         }
         else if (strcmp(argv[i], "--debug") == 0) {
             debug = true;
-            printf("Parsed --debug\n");
+            // printf("Parsed --debug\n");
         }
         else if (strcmp(argv[i], "--print-all") == 0) {
             print_all = true;
-            printf("Parsed --print-all\n");
+            // printf("Parsed --print-all\n");
         }
         else {
             fprintf(stderr, "Unknown argument: %s\n", argv[i]);
             return 1;
         }
     }
+    fflush(stdout);
 
     pin_to_cpu(cpu);
 
@@ -194,8 +196,6 @@ int main(int argc, char **argv) {
 
     long long sum_ns = 0, min_ns = 0, max_ns = 0;
 
-    fflush(stdout);
-
     /* Run Test */
     int received_ok = 0;
     for (int i = 0; i < n_tests; i++) {
@@ -223,7 +223,7 @@ int main(int argc, char **argv) {
         ++received_ok;
         // printf("iter=%d rtt=%.3f us\n", i, rtt_ns / 1e3);
     }
-    iocache_print_proc_util(iocache);
+    // iocache_print_proc_util(iocache);
 
     double avg_us = (sum_ns / (double)received_ok) / 1e3;
     printf("\nResults (%s): recv=%d/%d  min=%.3f us  avg=%.3f us  max=%.3f us\n",
@@ -243,7 +243,10 @@ int main(int argc, char **argv) {
         }
     }
 
-    fflush(stdout);
+    // fflush(stdout);
+    // fsync(fileno(stdout));
+    // if (isatty(fileno(stdout)))
+    // tcdrain(fileno(stdout));
 
     /* Close Accnet */
     accnet_close(accnet);

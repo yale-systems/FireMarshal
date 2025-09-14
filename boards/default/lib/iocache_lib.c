@@ -48,14 +48,15 @@ static int _iocache_ioctl(int fd, int index, off_t *offset, size_t *size) {
     if (offset) *offset = (off_t)region_info.offset;
     if (size)   *size   = (size_t)region_info.size;
 
-    /* Print safely: name may not be NUL-terminated */
-    printf("region index=%d, offset=0x%jx, size=0x%zx, name='%.*s', next=%u, flags=0x%x\n",
-           index,
-           (uintmax_t)region_info.offset,
-           (size_t)region_info.size,
-           (int)sizeof region_info.name, region_info.name,
-           region_info.next,
-           region_info.flags);
+    // /* Print safely: name may not be NUL-terminated */
+    // printf("region index=%d, offset=0x%jx, size=0x%zx, name='%.*s', next=%u, flags=0x%x\n",
+    //        index,
+    //        (uintmax_t)region_info.offset,
+    //        (size_t)region_info.size,
+    //        (int)sizeof region_info.name, region_info.name,
+    //        region_info.next,
+    //        region_info.flags);
+    // fflush(stdout);
 
     /* Optional: ensure page alignment for mmap */
     long pg = sysconf(_SC_PAGESIZE);
