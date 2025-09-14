@@ -28,7 +28,7 @@ static enum hrtimer_restart iocache_timeout_cb(struct hrtimer *t)
 
     /* Arm state may have been cleared by the fast path */
     if (READ_ONCE(iocache->armed) && tsk) {
-        WRITE_ONCE(tsk->__state, TASK_PARKED);
+        WRITE_ONCE(tsk->__state, TASK_RUNNING);
 		// sched_force_next_local(tsk);
         set_tsk_need_resched(current);  /* resched on this CPU after IRQ/softirq */
     }
@@ -232,11 +232,11 @@ static long iocache_misc_ioctl(struct file *file, unsigned int cmd, unsigned lon
 		 * Device interrupt will set current to TASK_RUNNING and run this
 		 */
 		schedule();
+		hrtimer_cancel(&iocache->to_hrtimer);
 		__set_current_state(TASK_RUNNING);
 
 		// iocache->syscall_time = ktime_get_mono_fast_ns();
 
-		hrtimer_cancel(&iocache->to_hrtimer);
 
 		/* Running again: clean up publication on every path */
 		WRITE_ONCE(iocache->armed, 0);
