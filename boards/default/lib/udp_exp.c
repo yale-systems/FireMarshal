@@ -194,6 +194,8 @@ int main(int argc, char **argv) {
 
     long long sum_ns = 0, min_ns = 0, max_ns = 0;
 
+    fflush(stdout);
+
     /* Run Test */
     int received_ok = 0;
     for (int i = 0; i < n_tests; i++) {
@@ -221,23 +223,27 @@ int main(int argc, char **argv) {
         ++received_ok;
         // printf("iter=%d rtt=%.3f us\n", i, rtt_ns / 1e3);
     }
+    iocache_print_proc_util(iocache);
+
     double avg_us = (sum_ns / (double)received_ok) / 1e3;
     printf("\nResults (%s): recv=%d/%d  min=%.3f us  avg=%.3f us  max=%.3f us\n",
                 mode, received_ok, n_tests, min_ns/1e3, avg_us, max_ns/1e3);
-    printf("Time breakdown average:\nEntry-Before: %.3f us\nPLIC-Entry: %.3f us\nIRQ-PLIC: %.3f us\n"
-        "Syscall-IRQ: %.3f us\nAfter-Syscall: %.3f us\n",
-            time_ns[0]/(double)received_ok/1e3, 
-            time_ns[1]/(double)received_ok/1e3, 
-            time_ns[2]/(double)received_ok/1e3, 
-            time_ns[3]/(double)received_ok/1e3,
-            time_ns[4]/(double)received_ok/1e3
-        );
+    // printf("Time breakdown average:\nEntry-Before: %.3f us\nPLIC-Entry: %.3f us\nIRQ-PLIC: %.3f us\n"
+    //     "Syscall-IRQ: %.3f us\nAfter-Syscall: %.3f us\n",
+    //         time_ns[0]/(double)received_ok/1e3, 
+    //         time_ns[1]/(double)received_ok/1e3, 
+    //         time_ns[2]/(double)received_ok/1e3, 
+    //         time_ns[3]/(double)received_ok/1e3,
+    //         time_ns[4]/(double)received_ok/1e3
+    //     );
 
     if (print_all) {
         for (int i = 0; i < n_tests; i++) {
             printf("iter=%d rtt=%.3f us\n", i, rtts[i] / 1e3);
         }
     }
+
+    fflush(stdout);
 
     /* Close Accnet */
     accnet_close(accnet);
@@ -286,32 +292,32 @@ uint8_t payload[], uint32_t payload_size, bool debug)
 
     if (ret == -1) return (struct timespec){0, 0};
 
-    /* IRQ timestamp */
-    if (iocache_get_last_ktimes(iocache, last_ktimes) == 0) {
-        struct timespec irq_ts, plic_ts, entry_ts, awake_ts, diff1, diff2, diff3, diff4, diff5;
-        entry_ts.tv_sec  = last_ktimes[0] / 1000000000ULL;
-        entry_ts.tv_nsec = last_ktimes[0] % 1000000000ULL;
-        plic_ts.tv_sec  = last_ktimes[1] / 1000000000ULL;
-        plic_ts.tv_nsec = last_ktimes[1] % 1000000000ULL;
-        irq_ts.tv_sec  = last_ktimes[2] / 1000000000ULL;
-        irq_ts.tv_nsec = last_ktimes[2] % 1000000000ULL;
-        awake_ts.tv_sec  = last_ktimes[3] / 1000000000ULL;
-        awake_ts.tv_nsec = last_ktimes[3] % 1000000000ULL;
+    // /* IRQ timestamp */
+    // if (iocache_get_last_ktimes(iocache, last_ktimes) == 0) {
+    //     struct timespec irq_ts, plic_ts, entry_ts, awake_ts, diff1, diff2, diff3, diff4, diff5;
+    //     entry_ts.tv_sec  = last_ktimes[0] / 1000000000ULL;
+    //     entry_ts.tv_nsec = last_ktimes[0] % 1000000000ULL;
+    //     plic_ts.tv_sec  = last_ktimes[1] / 1000000000ULL;
+    //     plic_ts.tv_nsec = last_ktimes[1] % 1000000000ULL;
+    //     irq_ts.tv_sec  = last_ktimes[2] / 1000000000ULL;
+    //     irq_ts.tv_nsec = last_ktimes[2] % 1000000000ULL;
+    //     awake_ts.tv_sec  = last_ktimes[3] / 1000000000ULL;
+    //     awake_ts.tv_nsec = last_ktimes[3] % 1000000000ULL;
 
-        diff1 = timespec_diff(&before, &entry_ts);
-        diff2 = timespec_diff(&entry_ts, &plic_ts);
-        diff3 = timespec_diff(&plic_ts, &irq_ts);
-        diff4 = timespec_diff(&irq_ts, &awake_ts);
-        diff5 = timespec_diff(&awake_ts, &after);
+    //     diff1 = timespec_diff(&before, &entry_ts);
+    //     diff2 = timespec_diff(&entry_ts, &plic_ts);
+    //     diff3 = timespec_diff(&plic_ts, &irq_ts);
+    //     diff4 = timespec_diff(&irq_ts, &awake_ts);
+    //     diff5 = timespec_diff(&awake_ts, &after);
 
-        time_ns[0] += diff1.tv_sec * 1e9 + diff1.tv_nsec;
-        time_ns[1] += diff2.tv_sec * 1e9 + diff2.tv_nsec;
-        time_ns[2] += diff3.tv_sec * 1e9 + diff3.tv_nsec;
-        time_ns[3] += diff4.tv_sec * 1e9 + diff4.tv_nsec;
-        time_ns[4] += diff5.tv_sec * 1e9 + diff5.tv_nsec;
-    } else {
-        printf("Either 'iocache_get_last_irq_ns' or 'iocache_get_last_ktimes' failed\n");
-    }
+    //     time_ns[0] += diff1.tv_sec * 1e9 + diff1.tv_nsec;
+    //     time_ns[1] += diff2.tv_sec * 1e9 + diff2.tv_nsec;
+    //     time_ns[2] += diff3.tv_sec * 1e9 + diff3.tv_nsec;
+    //     time_ns[3] += diff4.tv_sec * 1e9 + diff4.tv_nsec;
+    //     time_ns[4] += diff5.tv_sec * 1e9 + diff5.tv_nsec;
+    // } else {
+    //     printf("Either 'iocache_get_last_irq_ns' or 'iocache_get_last_ktimes' failed\n");
+    // }
 
     return timespec_diff(&before, &after);
 }

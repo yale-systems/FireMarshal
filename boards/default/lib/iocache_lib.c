@@ -15,10 +15,23 @@
 #include <sys/epoll.h>
 #include <sys/time.h>
 #include <sys/eventfd.h>
+#include <inttypes.h>
 
 #include "iocache_ioctl.h"
 #include "iocache_lib.h"
 #include "common.h"
+
+static inline void print_util(uint64_t start, uint64_t end, uint64_t used) {
+    if (end <= start) {
+        printf("Utilization: n/a (bad window)\n");
+        return;
+    }
+    uint64_t wall = end - start;
+    double pct = (double)used / (double)wall * 100.0;   // relative to one CPU
+    printf("CPU Utilization: %.1f%%  (cpu=%" PRIu64 " ns, wall=%" PRIu64 " ns)\n",
+           pct, used, wall);
+    fflush(stdout);
+}
 
 static int _iocache_ioctl(int fd, int index, off_t *offset, size_t *size) {
     struct iocache_ioctl_region_info region_info;
@@ -136,6 +149,18 @@ int iocache_get_last_ktimes(struct iocache_info *iocache, __u64 ktimes[3]) {
     }
     return 0;
 }
+
+int iocache_print_proc_util(struct iocache_info *iocache) {
+    __u64 *ns = malloc(sizeof(__u64) * 3);
+
+    if (ioctl(iocache->fd, IOCACHE_IOCTL_GET_PROC_UTIL, ns) == -1) {
+        perror("IOCACHE_IOCTL_GET_PROC_UTIL ioctl failed");
+        return -1;
+    }
+    printf("start=%lu, end=%lu, usage=%lu\n");
+    print_util(ns[0], ns[1], ns[2]);
+}
+
 
 int iocache_open(char *file, struct iocache_info *iocache) {
     

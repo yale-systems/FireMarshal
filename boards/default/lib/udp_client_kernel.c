@@ -1,13 +1,30 @@
+#define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
-#include <stdint.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/mman.h>
+#include <sys/ioctl.h>
 #include <unistd.h>
 #include <errno.h>
+#include <string.h>  
+#include <sys/types.h>
+#include <limits.h>
+#include <stdint.h>
+#include <assert.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <inttypes.h>
+#include <sys/time.h>
+#include <sys/select.h>
+#include <stdbool.h>
 #include <time.h>
+#include <sched.h>
+
 #include <arpa/inet.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+
 
 #define SERVER_IP   "10.0.0.2"
 #define SERVER_PORT 1111
@@ -34,6 +51,17 @@ static long long ts_diff_ns(const struct timespec *a, const struct timespec *b) 
 }
 
 int main(int argc, char **argv) {
+
+    int cpu = 0;
+    cpu_set_t set; CPU_ZERO(&set); CPU_SET(cpu, &set);
+    if (sched_setaffinity(0, sizeof(set), &set) != 0) {
+        perror("sched_setaffinity"); /* continue anyway */
+    }
+
+    struct sched_param sp = { .sched_priority = 10 }; // SCHED_FIFO 1..99
+    sched_setscheduler(0, SCHED_FIFO, &sp);
+    mlockall(MCL_CURRENT|MCL_FUTURE);
+
     int ntest = DEFAULT_NTEST;
     int payload = DEFAULT_PAYLOAD;
 

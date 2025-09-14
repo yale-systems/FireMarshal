@@ -68,6 +68,7 @@ int iocache_wait_on_rx(struct iocache_info *iocache);
 int iocache_wait_on_txcomp(struct iocache_info *iocache);
 int iocache_get_last_irq_ns(struct iocache_info *iocache, __u64 *ns);
 int iocache_get_last_ktimes(struct iocache_info *iocache, __u64 ktimes[3]);
+int iocache_print_proc_util(struct iocache_info *iocache);
 
 static inline void iocache_setup_connection(struct iocache_info *iocache, struct connection_info *entry) {
     int row = 0;

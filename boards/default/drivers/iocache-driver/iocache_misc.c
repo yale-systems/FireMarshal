@@ -4,24 +4,43 @@
 #include <linux/mm.h>
 #include <asm/set_memory.h>
 #include <linux/eventfd.h>
+#include <linux/math64.h> 
+#include <linux/sched/clock.h>
+#include <linux/preempt.h>
+#include <linux/smp.h> 
+
+static inline u64 now_sched_clock_cpu(void)
+{
+    u64 ns;
+    preempt_disable_notrace();
+    ns = sched_clock_cpu(raw_smp_processor_id());   // per-CPU, ns
+    preempt_enable_notrace();
+    return ns;
+}
 
 static enum hrtimer_restart iocache_timeout_cb(struct hrtimer *t)
 {
     struct iocache_device *iocache = container_of(t, struct iocache_device, to_hrtimer);
+	if (!iocache) return HRTIMER_NORESTART;
+
     struct task_struct *tsk = READ_ONCE(iocache->wait_task);
+	if (!tsk) return HRTIMER_NORESTART;
 
     /* Arm state may have been cleared by the fast path */
     if (READ_ONCE(iocache->armed) && tsk) {
         WRITE_ONCE(tsk->__state, TASK_PARKED);
-		sched_force_next_local(tsk);
+		// sched_force_next_local(tsk);
         set_tsk_need_resched(current);  /* resched on this CPU after IRQ/softirq */
     }
     return HRTIMER_NORESTART;
 }
 
+u64 start, end;
 
 static int iocache_misc_open(struct inode *inode, struct file *file) {
     struct iocache_device *iocache = container_of(file->private_data, struct iocache_device, misc_dev);
+
+	start = sched_clock();
 	
 	// Sanity check
 	if (iocache->magic != MAGIC_CHAR) {
@@ -47,6 +66,7 @@ static int iocache_misc_open(struct inode *inode, struct file *file) {
 static int iocache_misc_release(struct inode *inode, struct file *filp)
 {
     struct iocache_device *iocache = filp->private_data;
+
 	WRITE_ONCE(iocache->wait_task, NULL);
 	smp_wmb();                      // publish tsk before arming
 
@@ -169,9 +189,20 @@ static long iocache_misc_ioctl(struct file *file, unsigned int cmd, unsigned lon
         if (copy_to_user((void __user *)arg, &val, sizeof(val)))
             return -EFAULT;
         return 0;
-    } else if (cmd == IOCACHE_IOCTL_WAIT_READY) {
-		long tout = msecs_to_jiffies(2000);
+    } else if (cmd == IOCACHE_IOCTL_GET_PROC_UTIL) {
+		u64 usage;
+		end = sched_clock();
 
+		rcu_read_lock();
+		usage = READ_ONCE(current->my_oncpu_total_ns);
+		rcu_read_unlock();
+
+		u64 val[3] = {start, end, usage};
+
+        if (copy_to_user((void __user *)arg, &val, sizeof(val)))
+            return -EFAULT;
+        return 0;
+    } else if (cmd == IOCACHE_IOCTL_WAIT_READY) {
 		/* Fast path: event already present */
 		if (READ_ONCE(iocache->ready)) {
 			WRITE_ONCE(iocache->ready, 0);
@@ -200,7 +231,9 @@ static long iocache_misc_ioctl(struct file *file, unsigned int cmd, unsigned lon
 		 * Timeout will wake us via wake_up_process()
 		 * Device interrupt will set current to TASK_RUNNING and run this
 		 */
-		long left = schedule_timeout(tout);
+		schedule();
+		__set_current_state(TASK_RUNNING);
+
 		// iocache->syscall_time = ktime_get_mono_fast_ns();
 
 		hrtimer_cancel(&iocache->to_hrtimer);

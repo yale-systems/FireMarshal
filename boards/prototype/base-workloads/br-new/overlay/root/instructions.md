@@ -14,6 +14,11 @@ echo 3 | tee /proc/irq/14/smp_affinity_list # iocache
 echo 3 | tee /proc/irq/15/smp_affinity_list # iocache
 ```
 
+To get CPU utilization measurements prepend the following to your command:
+```shell
+time -f 'avg CPU: %P  (elapsed=%E)' 
+```
+
 Running udp echo experiment with kernel `socket` implementation using AccNIC:
 ```shell
 ./udp_client_kernel --ntest 64 --payload-size 64
