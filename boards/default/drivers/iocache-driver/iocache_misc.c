@@ -14,17 +14,20 @@
 
 static enum hrtimer_restart iocache_timeout_cb(struct hrtimer *t)
 {
-    struct iocache_device *iocache = container_of(t, struct iocache_device, to_hrtimer);
-	if (!iocache) return HRTIMER_NORESTART;
+    struct iocache_device *dev = container_of(t, struct iocache_device, to_hrtimer);
+    struct task_struct *tsk;
 
-    struct task_struct *tsk = READ_ONCE(iocache->wait_task);
-	if (!tsk) return HRTIMER_NORESTART;
+    /* Ensure we only proceed if the arming flag is still set. */
+    if (!smp_load_acquire(&dev->armed))
+        return HRTIMER_NORESTART;
 
-    /* Arm state may have been cleared by the fast path */
-    if (READ_ONCE(iocache->armed) && tsk) {
-        WRITE_ONCE(tsk->__state, TASK_RUNNING);
-        set_tsk_need_resched(current);  /* resched on this CPU after IRQ/softirq */
-    }
+    tsk = READ_ONCE(dev->wait_task);
+    if (!tsk)
+        return HRTIMER_NORESTART;
+
+    /* Wake it */
+    wake_up_process_iocache(tsk);
+
     return HRTIMER_NORESTART;
 }
 
@@ -95,6 +98,7 @@ static int iocache_misc_release(struct inode *inode, struct file *filp)
 	// smp_wmb();
 	// schedule();
 
+	wake_up_process(current);
 	__set_current_state(TASK_IOCACHE_SPECIAL);
 	schedule();
 
