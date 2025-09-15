@@ -18,15 +18,16 @@ static enum hrtimer_restart iocache_timeout_cb(struct hrtimer *t)
     struct task_struct *tsk;
 
     /* Ensure we only proceed if the arming flag is still set. */
-    if (!smp_load_acquire(&dev->armed))
+    if (!smp_load_acquire(&dev->armed)) 
         return HRTIMER_NORESTART;
 
     tsk = READ_ONCE(dev->wait_task);
-    if (!tsk)
+    if (!tsk || (tsk && task_is_running(tsk)))
         return HRTIMER_NORESTART;
 
     /* Wake it */
-    wake_up_process_iocache(tsk);
+	WRITE_ONCE(tsk->__state, TASK_RUNNING);
+	set_tsk_need_resched(current);  
 
     return HRTIMER_NORESTART;
 }
@@ -76,9 +77,6 @@ static int iocache_misc_release(struct inode *inode, struct file *filp)
 {
     struct iocache_device *iocache = filp->private_data;
 
-	WRITE_ONCE(iocache->wait_task, NULL);
-	smp_wmb();                      // publish tsk before arming
-
     if (iocache) {
         struct eventfd_ctx *old = NULL;
         spin_lock(&iocache->ev_lock);
@@ -98,12 +96,18 @@ static int iocache_misc_release(struct inode *inode, struct file *filp)
 	// smp_wmb();
 	// schedule();
 
-	wake_up_process(current);
-	__set_current_state(TASK_IOCACHE_SPECIAL);
+	// wake_up_process(current);
+	// wake_up_process_iocache(current);
+	// __set_current_state(TASK_IOCACHE_SPECIAL);
+	// schedule();
+
+	wake_up_process_iocache(current);
+	WRITE_ONCE(iocache->wait_task, NULL);
 	schedule();
 
-
 	// iocache_print_cpu_util();
+	// printk(KERN_INFO "\nIOCACHE Released successfull\n");
+	sched_force_next_local(NULL);
 
     return 0;
 }
@@ -243,14 +247,13 @@ static long iocache_misc_ioctl(struct file *file, unsigned int cmd, unsigned lon
 
 		/* Start a pinned hrtimer for the timeout on this CPU */
     	hrtimer_start(&iocache->to_hrtimer, iocache->to_period, HRTIMER_MODE_REL_PINNED);
-
 		/* Sleep;
 		 * Timeout will wake us via wake_up_process()
 		 * Device interrupt will set current to TASK_RUNNING and run this
 		 */
 		schedule();
-		hrtimer_cancel(&iocache->to_hrtimer);
 		__set_current_state(TASK_RUNNING);
+		hrtimer_cancel(&iocache->to_hrtimer);
 
 		// iocache->syscall_time = ktime_get_mono_fast_ns();
 
