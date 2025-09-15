@@ -6,6 +6,8 @@
 #include <linux/eventfd.h>
 #include <linux/math64.h> 
 #include <linux/sched/clock.h>
+#include <linux/sched.h>
+
 #include <linux/preempt.h>
 #include <linux/smp.h> 
 #include <linux/console.h>
@@ -21,7 +23,6 @@ static enum hrtimer_restart iocache_timeout_cb(struct hrtimer *t)
     /* Arm state may have been cleared by the fast path */
     if (READ_ONCE(iocache->armed) && tsk) {
         WRITE_ONCE(tsk->__state, TASK_RUNNING);
-		// sched_force_next_local(tsk);
         set_tsk_need_resched(current);  /* resched on this CPU after IRQ/softirq */
     }
     return HRTIMER_NORESTART;
@@ -85,12 +86,18 @@ static int iocache_misc_release(struct inode *inode, struct file *filp)
     }
 
 	/* 
-	 * We need it to end a process correctly by readding it to ready queues. 
-	 * We call schedule() in TASK_IOCACHE_SPECIAL that will automatically add our process to linux queues 
-	 * and unsets force_next_local.
+	 * We need it to end a process correctly by re-adding it to ready queues. 
+	 * We call wake_up_process_iocache() that will automatically add our process to linux queues 
+	 * and we will unset force_next_local.
 	 */
+	// wake_up_process_iocache(current);
+	// sched_force_next_local(NULL);
+	// smp_wmb();
+	// schedule();
+
 	__set_current_state(TASK_IOCACHE_SPECIAL);
 	schedule();
+
 
 	// iocache_print_cpu_util();
 
