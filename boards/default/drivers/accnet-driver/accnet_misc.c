@@ -109,7 +109,6 @@ static long accnet_misc_ioctl(struct file *file, unsigned int cmd, unsigned long
 		}
 
 		return copy_to_user((void __user *)arg, &info, minsz) ? -EFAULT : 0;
-
 	}
 
 	return -EINVAL;
@@ -123,9 +122,6 @@ static int accnet_misc_mmap(struct file *filp, struct vm_area_struct *vma)
 	int index;
 	u64 pgoff, req_len, req_start;
 
-	unsigned long phys = 0;
-	unsigned long psize;
-
 	index = vma->vm_pgoff >> (40 - PAGE_SHIFT);
 	req_len = vma->vm_end - vma->vm_start;
 	pgoff = vma->vm_pgoff & ((1U << (40 - PAGE_SHIFT)) - 1);
@@ -136,8 +132,6 @@ static int accnet_misc_mmap(struct file *filp, struct vm_area_struct *vma)
 
 	if ((vma->vm_flags & VM_SHARED) == 0)
 		return -EINVAL;
-
-	// pr_info("mmap: pgoff=%#lx size=%#lx\n", vma->vm_pgoff, vma->vm_end - vma->vm_start);
 
     switch (index) {
     case 0: { /* control MMIO */
@@ -164,47 +158,10 @@ static int accnet_misc_mmap(struct file *filp, struct vm_area_struct *vma)
 				(nic->hw_regs_udp_rx_phys >> PAGE_SHIFT) + pgoff,
 				req_len, pgprot_noncached(vma->vm_page_prot));
     }
-    case 3: { /* UDP TX DMA buffer (coherent) */
-		// pr_info("udp_tx: cpu=%p dma=%p len=%#zx\n",
-        //     nic->dma_region_udp_tx, &nic->dma_region_addr_udp_tx, nic->dma_region_len_udp_tx);
-
-        phys = virt_to_phys(nic->dma_region_udp_tx);  // Convert virtual to physical address
-        psize = nic->dma_region_len_udp_tx;
-
-		if (req_len > psize)
-		{
-			printk("*** 2: req_len = %llu,  psize = %lu *** \n", req_len, psize);
-			return -EINVAL;
-		}
-
-		vm_flags_mod(vma, VM_IO | VM_DONTEXPAND | VM_DONTDUMP, 0);
-		vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
-		vma->vm_pgoff = 0;
-		
-		return dma_mmap_coherent(nic->dev, vma, nic->dma_region_udp_tx, nic->dma_region_addr_udp_tx, req_len);
-    }
-    case 4: { /* UDP RX DMA buffer (coherent) */
-		// pr_info("udp_rx: cpu=%p dma=%p len=%#zx\n",
-        //     nic->dma_region_udp_rx, &nic->dma_region_addr_udp_rx, nic->dma_region_len_udp_rx);
-
-        phys = virt_to_phys(nic->dma_region_udp_rx);  // Convert virtual to physical address
-        psize = nic->dma_region_len_udp_rx;
-
-		if (req_len > psize)
-		{
-			printk("*** 3: req_len = %llu,  psize = %lu *** \n", req_len, psize);
-			return -EINVAL;
-		}
-
-		vm_flags_mod(vma, VM_IO | VM_DONTEXPAND | VM_DONTDUMP, 0);
-		vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
-		vma->vm_pgoff = 0;
-		
-		return dma_mmap_coherent(nic->dev, vma, nic->dma_region_udp_rx, nic->dma_region_addr_udp_rx, req_len);
-    }
     default:
         dev_err(nic->dev, "%s: unknown region index=%d pgoff=0x%lx\n",
                 __func__, index, vma->vm_pgoff);
         return -EINVAL;
     }
+
 }

@@ -14,6 +14,7 @@
 
 #include "accnet_ioctl.h"
 #include "accnet_lib.h"
+#include "iocache_lib.h"
 #include "common.h"
 
 static int _accnet_ioctl(int fd, int index, off_t *offset, size_t *size) {
@@ -51,49 +52,44 @@ static int _accnet_ioctl(int fd, int index, off_t *offset, size_t *size) {
 }
 
 /* Initialize udp on nic registers */
-static void _init_regs(struct accnet_info *accnet) {
-    // Contor registers
-	reg_write32(accnet->regs, ACCNET_CTRL_FILTER_PORT, 1234);
-	reg_write32(accnet->regs, ACCNET_CTRL_FILTER_IP,   0x0A000001); // 10.0.0.1
-	// RX
-	reg_write32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_SIZE, 0);
-	reg_write32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_HEAD, 0);
-	reg_write32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_TAIL, 0);
-	// TX
-	reg_write32(accnet->udp_tx_regs, ACCNET_UDP_TX_RING_SIZE, 0);
-	reg_write32(accnet->udp_tx_regs, ACCNET_UDP_TX_RING_HEAD, 0);
-	reg_write32(accnet->udp_tx_regs, ACCNET_UDP_TX_RING_TAIL, 0);
+static void _init_regs(struct accnet_info *accnet, int row) {
+
+    // printf("Init regs for row %d\n", accnet->iocache->row);
 
 	reg_write16(accnet->udp_tx_regs, ACCNET_UDP_TX_MTU, 1472);
 	reg_write64(accnet->udp_tx_regs, ACCNET_UDP_TX_HDR_MAC_SRC, 0x112233445566); 
 	reg_write64(accnet->udp_tx_regs, ACCNET_UDP_TX_HDR_MAC_DST, 0x0c42a1a82de6);// 0c:42:a1:a8:2d:e6
-	reg_write32(accnet->udp_tx_regs, ACCNET_UDP_TX_HDR_IP_SRC, 0x0a0b0c0d);
-	reg_write32(accnet->udp_tx_regs, ACCNET_UDP_TX_HDR_IP_DST, 0x0A000001);
 	reg_write8 (accnet->udp_tx_regs, ACCNET_UDP_TX_HDR_IP_TOS, 0);
 	reg_write8 (accnet->udp_tx_regs, ACCNET_UDP_TX_HDR_IP_TTL, 64);
 	reg_write16(accnet->udp_tx_regs, ACCNET_UDP_TX_HDR_IP_ID, 0);
-	reg_write16(accnet->udp_tx_regs, ACCNET_UDP_TX_HDR_UDP_SRC_PORT, 1111);
-	reg_write16(accnet->udp_tx_regs, ACCNET_UDP_TX_HDR_UDP_DST_PORT, 1234);
-	// reg_write8(accnet->udp_tx_regs, ACCNET_UDP_TX_HDR_UDP_CSUM, 1500);
+
+    reg_write32(accnet->iocache->regs, IOCACHE_REG_RX_RING_SIZE(row),   0);
+    reg_write32(accnet->iocache->regs, IOCACHE_REG_TX_RING_SIZE(row),   0);
+	reg_write32(accnet->udp_tx_regs, ACCNET_UDP_TX_RING_HEAD(row), 0);
+	reg_write32(accnet->udp_tx_regs, ACCNET_UDP_TX_RING_TAIL(row), 0);
+    reg_write32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_HEAD(row), 0);
+	reg_write32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_TAIL(row), 0);
+    reg_write32(accnet->iocache->regs, IOCACHE_REG_RX_RING_SIZE(row),   accnet->iocache->udp_rx_size);
+    reg_write32(accnet->iocache->regs, IOCACHE_REG_TX_RING_SIZE(row),   accnet->iocache->udp_tx_size);
+
+    if (reg_read32(accnet->udp_tx_regs, ACCNET_UDP_TX_RING_TAIL(row)) != 0) {
+        exit(0);
+    }
+    if (reg_read32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_TAIL(row)) != 0) {
+        exit(0);
+    }
 }
 
-static void _deinit_regs(struct accnet_info *accnet) {
-	// RX
-	reg_write32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_SIZE, 0);
-	reg_write32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_HEAD, 0);
-	reg_write32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_TAIL, 0);
-	// TX
-	reg_write32(accnet->udp_tx_regs, ACCNET_UDP_TX_RING_SIZE, 0);
-	reg_write32(accnet->udp_tx_regs, ACCNET_UDP_TX_RING_HEAD, 0);
-	reg_write32(accnet->udp_tx_regs, ACCNET_UDP_TX_RING_TAIL, 0);
+static void _deinit_regs(struct accnet_info *accnet, int row) {
+    
 }
 
 int accnet_setup_connection(struct accnet_info *accnet, struct connection_info *connection) {
     if (accnet) {
-        reg_write32(accnet->udp_tx_regs, ACCNET_UDP_TX_HDR_IP_SRC,       connection->src_ip);
-        reg_write32(accnet->udp_tx_regs, ACCNET_UDP_TX_HDR_IP_DST,       connection->dst_ip);
-        reg_write16(accnet->udp_tx_regs, ACCNET_UDP_TX_HDR_UDP_SRC_PORT, connection->src_port);
-        reg_write16(accnet->udp_tx_regs, ACCNET_UDP_TX_HDR_UDP_DST_PORT, connection->dst_port);
+        // reg_write32(accnet->udp_tx_regs, ACCNET_UDP_TX_HDR_IP_SRC,       connection->src_ip);
+        // reg_write32(accnet->udp_tx_regs, ACCNET_UDP_TX_HDR_IP_DST,       connection->dst_ip);
+        // reg_write16(accnet->udp_tx_regs, ACCNET_UDP_TX_HDR_UDP_SRC_PORT, connection->src_port);
+        // reg_write16(accnet->udp_tx_regs, ACCNET_UDP_TX_HDR_UDP_DST_PORT, connection->dst_port);
         if (connection->src_mac) {
             reg_write64(accnet->udp_tx_regs, ACCNET_UDP_TX_HDR_MAC_SRC, connection->src_mac);
         }
@@ -109,8 +105,8 @@ int accnet_setup_connection(struct accnet_info *accnet, struct connection_info *
 
 int accnet_start_ring(struct accnet_info *accnet) {
     if (accnet) {
-        reg_write32(accnet->udp_tx_regs, ACCNET_UDP_TX_RING_SIZE, accnet->udp_tx_size);
-        reg_write32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_SIZE, accnet->udp_rx_size);
+        // reg_write32(accnet->udp_tx_regs, ACCNET_UDP_TX_RING_SIZE, accnet->udp_tx_size);
+        // reg_write32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_SIZE, accnet->udp_rx_size);
         return 0;
     }
     else {
@@ -118,17 +114,30 @@ int accnet_start_ring(struct accnet_info *accnet) {
     }
 }
 
+uint64_t accnet_get_outside_ticks(struct accnet_info *accnet) {
+    uint64_t rx_timestamp = reg_read64(accnet->udp_rx_regs, ACCNET_UDP_RX_LAST_TIMESTAMP);
+    uint64_t tx_timestamp = reg_read64(accnet->udp_tx_regs, ACCNET_UDP_TX_LAST_TIMESTAMP);
+
+    if (rx_timestamp <= tx_timestamp) {
+        printf("Warning: bad timestamps -- tx=%lu , rx=%lu\n", tx_timestamp, rx_timestamp);
+        return 0;
+    }
+    return (uint64_t)(rx_timestamp - tx_timestamp);
+}
+
 size_t accnet_send(struct accnet_info *accnet, void *buffer, size_t len) {
+    struct iocache_info *iocache = accnet->iocache;
+
     uint32_t tx_head, tx_tail, tx_size;
 
     tx_head = accnet_get_tx_head(accnet); 
     tx_tail = accnet_get_tx_tail(accnet); 
-    tx_size = accnet_get_tx_size(accnet); 
+    tx_size = iocache->udp_tx_size;
 
     uint32_t avail = (tx_tail > tx_head) ? tx_tail - tx_head : tx_size - (tx_head - tx_size);
-    uint32_t val = (tx_tail + len) % accnet->udp_tx_size;
+    uint32_t val = (tx_tail + len) % tx_size;
 
-    memcpy((char *)accnet->udp_tx_buffer + tx_tail, buffer, len);
+    memcpy((char *)iocache->udp_tx_buffer + tx_tail, buffer, len);
     __sync_synchronize();
 
     accnet_set_tx_tail(accnet, val);
@@ -136,19 +145,16 @@ size_t accnet_send(struct accnet_info *accnet, void *buffer, size_t len) {
     return len;
 }
 
-int accnet_open(char *file, struct accnet_info *accnet, bool do_init) {
+int accnet_open(char *file, struct accnet_info *accnet, struct iocache_info *iocache, bool do_init) {
     uintptr_t p;
-
-    const size_t ALIGN = 64;
-
-    accnet->udp_tx_size = 256 * 1024;
-    accnet->udp_rx_size = 256 * 1024;
 
     accnet->fd = open(file, O_RDWR | O_SYNC);
     if (accnet->fd < 0) {
         perror("open");
         return -1;
     }
+
+    accnet->iocache = iocache;
 
     if (_accnet_ioctl(accnet->fd, 0, &accnet->regs_offset, &accnet->regs_size) != 0 ||
     _accnet_ioctl(accnet->fd, 1, &accnet->udp_tx_offset, &accnet->udp_tx_regs_size) != 0 ||
@@ -183,27 +189,8 @@ int accnet_open(char *file, struct accnet_info *accnet, bool do_init) {
         return -1;
     }
 
-    accnet->udp_tx_buffer = mmap(NULL, accnet->udp_tx_size + (ALIGN - 1), PROT_READ | PROT_WRITE, MAP_SHARED, accnet->fd, MAP_INDEX(3));
-    if (accnet->udp_tx_buffer == MAP_FAILED) {
-        perror("mmap udp tx");
-        close(accnet->fd);
-        return -1;
-    }
-    p = (uintptr_t)accnet->udp_tx_buffer;
-    accnet->udp_tx_buffer_aligned = (void *)((p + (ALIGN - 1)) & ~(uintptr_t)(ALIGN - 1));
-
-    accnet->udp_rx_buffer = mmap(NULL, accnet->udp_rx_size + (ALIGN - 1), PROT_READ | PROT_WRITE, MAP_SHARED, accnet->fd, MAP_INDEX(4));
-    if (accnet->udp_rx_buffer == MAP_FAILED) {
-        perror("mmap udp rx");
-        munmap((void *)(uintptr_t) accnet->udp_tx_regs, accnet->udp_tx_regs_size);
-        close(accnet->fd);
-        return -1;
-    }
-    p = (uintptr_t)accnet->udp_rx_buffer;
-    accnet->udp_rx_buffer_aligned = (void *)((p + (ALIGN - 1)) & ~(uintptr_t)(ALIGN - 1));
-
     if (do_init) {
-        _init_regs(accnet);
+        _init_regs(accnet, iocache->row);
     }
 
     return 0;
@@ -211,12 +198,10 @@ int accnet_open(char *file, struct accnet_info *accnet, bool do_init) {
 
 /* Cleanup */
 int accnet_close(struct accnet_info *accnet) {
-    _deinit_regs(accnet);
+    _deinit_regs(accnet, accnet->iocache->row);
     munmap((void *)(uintptr_t) accnet->regs, accnet->regs_size);
     munmap((void *)(uintptr_t) accnet->udp_tx_regs, accnet->udp_tx_regs_size);
     munmap((void *)(uintptr_t) accnet->udp_rx_regs, accnet->udp_rx_regs_size);
-    munmap((void *)(uintptr_t) accnet->udp_rx_buffer, accnet->udp_rx_size);
-    munmap((void *)(uintptr_t) accnet->udp_tx_buffer, accnet->udp_tx_size);
     close(accnet->fd);
 
     return 0;

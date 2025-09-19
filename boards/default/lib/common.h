@@ -11,6 +11,9 @@
 #define CLOCK_MONOTONIC 1
 #endif
 
+#define CPU_FREQ_MHZ    60
+#define US_PER_TICK     ((double)1 / CPU_FREQ_MHZ)
+
 #define reg_read64(base, reg) (((volatile uint64_t *)(base))[(reg)/8])
 #define reg_write64(base, reg, val) (((volatile uint64_t *)(base))[(reg)/8]) = val
 

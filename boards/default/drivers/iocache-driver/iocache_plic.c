@@ -58,33 +58,35 @@ static int plic_set_prio(struct iocache_device *iocache) {
     int ret;
 	unsigned int hwirq;
 
-    /* Map the PLIC MMIO region once */
+	/* Map the PLIC MMIO region once */
 	ret = map_plic_base(iocache);
 	if (ret) {
 		dev_err(iocache->dev, "failed to map PLIC base: %d\n", ret);
 		return ret;
 	}
 
-	/* RX IRQ: resolve to hwirq and set priority */
-	hwirq = get_hwirq(iocache->rx_irq);
-	if (!hwirq) {
-		dev_err(iocache->dev, "could not resolve hwirq for RX irq %d\n",
-			iocache->rx_irq);
-		return ret;
-	} else {
-		iocache->rx_hwirq = hwirq;
-		plic_set_src_prio(iocache, hwirq, MAX_PRIORITY);
-	}
+	for (uint32_t i = 0; i < NUM_CPUS; i++) {
+		/* RX IRQ: resolve to hwirq and set priority */
+		hwirq = get_hwirq(iocache->rx_irq[i]);
+		if (!hwirq) {
+			dev_err(iocache->dev, "could not resolve hwirq for RX irq %d\n",
+				iocache->rx_irq[i]);
+			return ret;
+		} else {
+			iocache->rx_hwirq[i] = hwirq;
+			plic_set_src_prio(iocache, hwirq, MAX_PRIORITY);
+		}
 
-	/* TX completion IRQ: resolve to hwirq and set priority */
-	hwirq = get_hwirq(iocache->txcomp_irq);
-	if (!hwirq) {
-		dev_err(iocache->dev, "could not resolve hwirq for TXCOMP irq %d\n",
-				iocache->txcomp_irq);
-		return ret;
-	} else {
-		iocache->txcomp_hwirq = hwirq;
-		plic_set_src_prio(iocache, hwirq, MAX_PRIORITY);
+		/* TX completion IRQ: resolve to hwirq and set priority */
+		hwirq = get_hwirq(iocache->txcomp_irq[i]);
+		if (!hwirq) {
+			dev_err(iocache->dev, "could not resolve hwirq for TXCOMP irq %d\n",
+					iocache->txcomp_irq[i]);
+			return ret;
+		} else {
+			iocache->txcomp_hwirq[i] = hwirq;
+			plic_set_src_prio(iocache, hwirq, MAX_PRIORITY);
+		}
 	}
 
     return 0;
@@ -98,37 +100,41 @@ static int plic_register_fast_path(
     int ret;
 	unsigned int hwirq;
 
-	/* RX IRQ: resolve to hwirq and Register PLIC bypass */
-	hwirq = get_hwirq(iocache->rx_irq);
-	if (!hwirq) {
-		dev_err(iocache->dev, "could not resolve hwirq for RX irq %d\n",
-				iocache->rx_irq);
-		return ret;
-	} else {
-		iocache->rx_hwirq = hwirq;
-        ret = plic_register_source_handler(hwirq, fn_rx, iocache);
-        if (ret) 
+	for (uint32_t i = 0; i < NUM_CPUS; i++) {
+		/* RX IRQ: resolve to hwirq and Register PLIC bypass */
+		hwirq = get_hwirq(iocache->rx_irq[i]);
+		if (!hwirq) {
+			dev_err(iocache->dev, "could not resolve hwirq for RX irq %d\n",
+					iocache->rx_irq[i]);
 			return ret;
-	}
-
-	/* TX completion IRQ: resolve to hwirq and Register PLIC bypass */
-	hwirq = get_hwirq(iocache->txcomp_irq);
-	if (!hwirq) {
-		dev_err(iocache->dev, "could not resolve hwirq for TXCOMP irq %d\n",
-				iocache->txcomp_irq);
-		return ret;
-	} else {
-		iocache->txcomp_hwirq = hwirq;
-		ret = plic_register_source_handler(hwirq, fn_txcomp, iocache);
-        if (ret) 
+		} else {
+			iocache->rx_hwirq[i] = hwirq;
+			ret = plic_register_source_handler(hwirq, fn_rx, iocache);
+			if (ret) 
+				return ret;
+		}
+	
+		/* TX completion IRQ: resolve to hwirq and Register PLIC bypass */
+		hwirq = get_hwirq(iocache->txcomp_irq[i]);
+		if (!hwirq) {
+			dev_err(iocache->dev, "could not resolve hwirq for TXCOMP irq %d\n",
+					iocache->txcomp_irq[i]);
 			return ret;
+		} else {
+			iocache->txcomp_hwirq[i] = hwirq;
+			ret = plic_register_source_handler(hwirq, fn_txcomp, iocache);
+			if (ret) 
+				return ret;
+		}
 	}
 
     return 0;
 }
 
 static int plic_unregister_fast_path(struct iocache_device *iocache) {
-	plic_unregister_source_handler(iocache->rx_hwirq);
-	plic_unregister_source_handler(iocache->txcomp_hwirq);
+	for (uint32_t i = 0; i < NUM_CPUS; i++) {
+		plic_unregister_source_handler(iocache->rx_hwirq[i]);
+		plic_unregister_source_handler(iocache->txcomp_hwirq[i]);
+	}
 	return 0;
 }

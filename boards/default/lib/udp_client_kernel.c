@@ -24,6 +24,8 @@
 #include <arpa/inet.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <bits/cpu-set.h>
+
 
 
 #define SERVER_IP   "10.0.0.2"

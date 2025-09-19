@@ -36,7 +36,6 @@
 #define ACCNET_INTMASK_RX 2
 #define ACCNET_INTMASK_BOTH 3
 
-// #define ACCNIC_BASE 0x10018000L
 #define ACCNET_BASE 0x0
 #define ACCNET_CTRL_OFFSET 0x0000
 #define ACCNET_RX_OFFSET 0x0000
@@ -50,46 +49,73 @@
 #define ACCNET_INTR_MASK (ACCNET_CTRL_BASE + 0x00)
 
 // RX Engine registers
-#define ACCNET_RX_DMA_ADDR_COUNT (ACCNET_RX_BASE + 0x04)
-#define ACCNET_RX_DMA_ADDR (ACCNET_RX_BASE + 0x08)
-#define ACCNET_RX_COMP_LOG (ACCNET_RX_BASE + 0x10)
-#define ACCNET_RX_COMP_COUNT (ACCNET_RX_BASE + 0x18)
-#define ACCNET_RX_INTR_PEND (ACCNET_RX_BASE + 0x20)
-#define ACCNET_RX_INTR_CLEAR (ACCNET_RX_BASE + 0x24)
+#define ACCNET_RX_DMA_ADDR_COUNT 		0x04
+#define ACCNET_RX_DMA_ADDR 				0x08
+#define ACCNET_RX_COMP_LOG 				0x10
+#define ACCNET_RX_COMP_COUNT 			0x18
+#define ACCNET_RX_INTR_PEND 			0x20
+#define ACCNET_RX_INTR_CLEAR 			0x24
 
 // TX Engine registers
-#define ACCNET_TX_REQ_COUNT (ACCNET_TX_BASE + 0x00)
-#define ACCNET_TX_REQ (ACCNET_TX_BASE + 0x08)
-#define ACCNET_TX_COUNT (ACCNET_TX_BASE + 0x10)
-#define ACCNET_TX_COMP_READ (ACCNET_TX_BASE + 0x12)
-#define ACCNET_TX_INTR_PEND (ACCNET_TX_BASE + 0x18)
-#define ACCNET_TX_INTR_CLEAR (ACCNET_TX_BASE + 0x1C)
+#define ACCNET_TX_REQ_COUNT 			0x00
+#define ACCNET_TX_REQ 					0x08
+#define ACCNET_TX_COUNT 				0x10
+#define ACCNET_TX_COMP_READ 			0x12
+#define ACCNET_TX_INTR_PEND 			0x18
+#define ACCNET_TX_INTR_CLEAR 			0x1C
 
-/* UDP */
-#define ACCNET_UDP_RING_SIZE 1024 * 1024
+/* =========================  UDP  =========================== */
+#define ACCNET_UDP_RING_SIZE 	32 * 1024 		// 64KB
+#define ACCNET_UDP_RING_COUNT	64
 
-// UDP RX Engine registers
-#define ACCNET_UDP_RX_RING_BASE 0x00
-#define ACCNET_UDP_RX_RING_SIZE 0x08
-#define ACCNET_UDP_RX_RING_HEAD 0x0C
-#define ACCNET_UDP_RX_RING_TAIL 0x10
+/* ===================================================================== */
+/* =========================  UDP RX ENGINE  =========================== */
+/* ===================================================================== */
+#define ACCNET_UDP_RX_RING_STRIDE          0x10UL
 
-// UDP TX Engine registers
-#define ACCNET_UDP_TX_RING_BASE        0x00
-#define ACCNET_UDP_TX_RING_SIZE        0x08
-#define ACCNET_UDP_TX_RING_HEAD        0x0C
-#define ACCNET_UDP_TX_RING_TAIL        0x10
-#define ACCNET_UDP_TX_MTU              0x14
-#define ACCNET_UDP_TX_HDR_MAC_SRC      0x20
-#define ACCNET_UDP_TX_HDR_MAC_DST      0x28
-#define ACCNET_UDP_TX_HDR_IP_SRC       0x30
-#define ACCNET_UDP_TX_HDR_IP_DST       0x34
-#define ACCNET_UDP_TX_HDR_IP_TOS       0x38
-#define ACCNET_UDP_TX_HDR_IP_TTL       0x39
-#define ACCNET_UDP_TX_HDR_IP_ID        0x3A
-#define ACCNET_UDP_TX_HDR_UDP_SRC_PORT 0x40
-#define ACCNET_UDP_TX_HDR_UDP_DST_PORT 0x42
-#define ACCNET_UDP_TX_HDR_UDP_CSUM     0x44
+#define ACCNET_UDP_RX_RING_HEAD_OFF        0x00UL
+#define ACCNET_UDP_RX_RING_TAIL_OFF        0x04UL
+#define ACCNET_UDP_RX_RING_DROP_OFF        0x08UL
+
+#define ACCNET_UDP_RX_RING_REG(r, off)    ((uint64_t)(r) * ACCNET_UDP_RX_RING_STRIDE + (off))
+
+/* Per-ring convenience */
+#define ACCNET_UDP_RX_RING_HEAD(r)        ACCNET_UDP_RX_RING_REG((r), ACCNET_UDP_RX_RING_HEAD_OFF)   /* 32-bit */
+#define ACCNET_UDP_RX_RING_TAIL(r)        ACCNET_UDP_RX_RING_REG((r), ACCNET_UDP_RX_RING_TAIL_OFF)   /* 32-bit */
+#define ACCNET_UDP_RX_RING_DROP(r)        ACCNET_UDP_RX_RING_REG((r), ACCNET_UDP_RX_RING_DROP_OFF)   /* 32-bit, RO */
+
+/* Engine-level IRQ */
+#define ACCNET_UDP_RX_IRQ_PENDING         0x400UL
+#define ACCNET_UDP_RX_IRQ_CLEAR           0x404UL
+#define ACCNET_UDP_RX_LAST_TIMESTAMP      0x408UL
+
+/* ===================================================================== */
+/* =========================  UDP TX ENGINE  =========================== */
+/* ===================================================================== */
+#define ACCNET_UDP_TX_RING_STRIDE          0x10UL
+
+#define ACCNET_UDP_TX_RING_HEAD_OFF        0x00UL
+#define ACCNET_UDP_TX_RING_TAIL_OFF        0x04UL
+
+#define ACCNET_UDP_TX_RING_REG(r, off)    ((uint64_t)(r) * ACCNET_UDP_TX_RING_STRIDE + (off))
+
+/* Per-ring convenience */
+#define ACCNET_UDP_TX_RING_HEAD(r)        ACCNET_UDP_TX_RING_REG((r), ACCNET_UDP_TX_RING_HEAD_OFF)   /* 32-bit */
+#define ACCNET_UDP_TX_RING_TAIL(r)        ACCNET_UDP_TX_RING_REG((r), ACCNET_UDP_TX_RING_TAIL_OFF)   /* 32-bit */
+
+/* Global/header regs */
+#define ACCNET_UDP_TX_MTU                 0x400UL  /* 16-bit */
+#define ACCNET_UDP_TX_HDR_MAC_DST         0x408UL  /* 64-bit; write low 48b used */
+#define ACCNET_UDP_TX_HDR_MAC_SRC         0x410UL  /* 64-bit; write low 48b used */
+#define ACCNET_UDP_TX_HDR_IP_TOS          0x420UL  /* 8-bit  */
+#define ACCNET_UDP_TX_HDR_IP_TTL          0x424UL  /* 8-bit  */
+#define ACCNET_UDP_TX_HDR_IP_ID           0x428UL  /* 16-bit */
+#define ACCNET_UDP_TX_HDR_UDP_CSUM0_OK    0x42CUL  /* 1-bit  */
+
+/* TX IRQ */
+#define ACCNET_UDP_TX_IRQ_PENDING         0x430UL
+#define ACCNET_UDP_TX_IRQ_CLEAR           0x434UL
+#define ACCNET_UDP_TX_LAST_TIMESTAMP      0x438UL
 
 // Others
 #define ETH_HEADER_BYTES 14
@@ -124,8 +150,6 @@ typedef enum {
 
 struct accnet_device {
 	struct device *dev;
-	void __iomem *iomem_tx;
-	void __iomem *iomem_rx;
 	struct napi_struct napi;
 	struct sk_buff_cq send_cq;
 	struct sk_buff_cq recv_cq;
@@ -134,19 +158,11 @@ struct accnet_device {
 	int tx_irq;
 	int rx_irq;
 
-	// DMA buffer UDP TX
-	size_t dma_region_len_udp_tx;
-	void *dma_region_udp_tx, *dma_region_udp_tx_aligned;
-	dma_addr_t dma_region_addr_udp_tx, dma_region_addr_udp_tx_aligned;
-
-	// DMA buffer UDP RX
-	size_t dma_region_len_udp_rx;
-	void *dma_region_udp_rx, *dma_region_udp_rx_aligned;
-	dma_addr_t dma_region_addr_udp_rx, dma_region_addr_udp_rx_aligned;
-
 	resource_size_t hw_regs_control_size;
 	phys_addr_t hw_regs_control_phys;
 	void __iomem *iomem;
+	void __iomem *iomem_tx;
+	void __iomem *iomem_rx;
 
 	resource_size_t hw_regs_udp_tx_size;
 	phys_addr_t hw_regs_udp_tx_phys;

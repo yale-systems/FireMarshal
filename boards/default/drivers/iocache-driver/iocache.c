@@ -41,24 +41,24 @@ MODULE_AUTHOR("Amirmohammad Nazari");
 MODULE_LICENSE("Dual MIT/GPL");
 
 
-static inline void set_intmask_rx(struct iocache_device *iocache, uint32_t mask)
+static inline void set_intmask_rx(struct iocache_device *iocache, int cpu)
 {
-	iowrite8(0x1, REG(iocache->iomem, IOCACHE_REG_INTMASK_RX));
+	iowrite8(0x1, REG(iocache->iomem, IOCACHE_REG_INTMASK_RX(cpu)));
 }
 
-static inline void clear_intmask_rx(struct iocache_device *iocache, uint32_t mask)
+static inline void clear_intmask_rx(struct iocache_device *iocache, int cpu)
 {
-	iowrite8(0x0, REG(iocache->iomem, IOCACHE_REG_INTMASK_RX));
+	iowrite8(0x0, REG(iocache->iomem, IOCACHE_REG_INTMASK_RX(cpu)));
 }
 
-static inline void set_intmask_txcomp(struct iocache_device *iocache, uint32_t mask)
+static inline void set_intmask_txcomp(struct iocache_device *iocache, int cpu)
 {
-	iowrite8(0x1, REG(iocache->iomem, IOCACHE_REG_INTMASK_TXCOMP));
+	iowrite8(0x1, REG(iocache->iomem, IOCACHE_REG_INTMASK_TXCOMP(cpu)));
 }
 
-static inline void clear_intmask_txcomp(struct iocache_device *iocache, uint32_t mask)
+static inline void clear_intmask_txcomp(struct iocache_device *iocache, int cpu)
 {
-	iowrite8(0x0, REG(iocache->iomem, IOCACHE_REG_INTMASK_TXCOMP));
+	iowrite8(0x0, REG(iocache->iomem, IOCACHE_REG_INTMASK_TXCOMP(cpu)));
 }
 
 static const struct file_operations iocache_fops = {
@@ -73,30 +73,20 @@ extern u64 riscv_get_irq_entry_ktime(void);   // from do_irq patch
 extern u64 riscv_get_plic_claim_ktime(void);  // new, from plic_handle_irq
 
 static irqreturn_t iocache_isr_rx(int irq, void *data) {
-	// printk(KERN_DEBUG "RX interrupt received\n");
-
+	
 	struct iocache_device *iocache = data;
+	int cpu = smp_processor_id();
+	
+	// printk(KERN_INFO "RX interrupt received at cpu %d\n", cpu);
 
-	// save timestamp
-    // iocache->entry_ktime = riscv_get_irq_entry_ktime();
-    // iocache->claim_ktime = riscv_get_plic_claim_ktime();
+	iowrite32(cpu, REG(iocache->iomem, IOCACHE_REG_RX_KICK_ALL_CPU));
+	mmiowb();
 
-	clear_intmask_rx(iocache, IOCACHE_INTMASK_RX);
+	// printk(KERN_INFO "Kick Count: %d\n", ioread8(REG(iocache->iomem, IOCACHE_REG_RX_KICK_ALL_COUNT)));
+	// printk(KERN_INFO "Kick Mask : 0x%llX\n", ioread64(REG(iocache->iomem, IOCACHE_REG_RX_KICK_ALL_MASK)));
+	// clear_intmask_rx(iocache, cpu);
 
-	/* Mark event first, then wake */
-	WRITE_ONCE(iocache->ready, 1);
-
-	/* Only try to wake when process armed itself */
-	if (READ_ONCE(iocache->armed)) {
-		struct task_struct *tsk = READ_ONCE(iocache->wait_task);
-		if (likely(tsk)) {
-			WRITE_ONCE(tsk->__state, TASK_RUNNING);
-		}
-		set_tsk_need_resched(current);  
-	}
-
-	// u64 now = ktime_get_mono_fast_ns();   // OK in hard IRQ
-	// iocache->isr_ktime   = now;
+	set_tsk_need_resched(current);
 
     return IRQ_HANDLED;
 }
@@ -110,39 +100,54 @@ static irqreturn_t iocache_isr_txcomp(int irq, void *data) {
 static int iocache_parse_irq(struct iocache_device *iocache) {
 	struct device *dev = iocache->dev;
 	struct device_node *node = dev->of_node;
+	cpumask_t mask;
 	int err;
 
 	const char *name = of_node_full_name(node);
 	dev_info(dev, "Device Tree node: %s\n", name);
 
-	iocache->rx_irq = irq_of_parse_and_map(node, 0);
-	if (!iocache->rx_irq) {
-    	dev_err(dev, "Failed to parse RX IRQ from DT\n");
-		return -EINVAL;
-	}
-	
-	dev_info(dev, "Requesting RX IRQ %d\n", iocache->rx_irq);
-	err = devm_request_irq(dev, iocache->rx_irq, iocache_isr_rx,
-			IRQF_SHARED | IRQF_NO_THREAD,
-			IOCACHE_NAME, iocache);
-	if (err) {
-		dev_err(dev, "could not obtain rx irq %d\n", iocache->rx_irq);
-		return err;
-	}
+	for (uint32_t i = 0; i < NUM_CPUS; i++) {
+		int rx_index = 2*i;
+		int tx_index = 2*i + 1;
 
-	iocache->txcomp_irq = irq_of_parse_and_map(node, 1);
-	if (!iocache->txcomp_irq) {
-    	dev_err(dev, "Failed to parse TX_COMP IRQ from DT\n");
-		return -EINVAL;
-	}
-	
-	dev_info(dev, "Requesting TX_COMP IRQ %d\n", iocache->txcomp_irq);
-	err = devm_request_irq(dev, iocache->txcomp_irq, iocache_isr_txcomp,
-			IRQF_SHARED | IRQF_NO_THREAD,
-			IOCACHE_NAME, iocache);
-	if (err) {
-		dev_err(dev, "could not obtain tx_comp irq %d\n", iocache->txcomp_irq);
-		return err;
+		iocache->rx_irq[i] = irq_of_parse_and_map(node, rx_index);
+		if (!iocache->rx_irq[i]) {
+			dev_err(dev, "Failed to parse RX IRQ from DT\n");
+			return -EINVAL;
+		}
+		
+		dev_info(dev, "Requesting RX IRQ %d\n", iocache->rx_irq[i]);
+		err = devm_request_irq(dev, iocache->rx_irq[i], iocache_isr_rx,
+				IRQF_SHARED | IRQF_NO_THREAD,
+				IOCACHE_NAME, iocache);
+		if (err) {
+			dev_err(dev, "could not obtain rx irq %d\n", iocache->rx_irq[i]);
+			return err;
+		}
+
+		/* Force the core to steer RX IRQ to CPU i */
+		cpumask_clear(&mask);
+		cpumask_set_cpu(i, &mask);
+		irq_set_affinity(iocache->rx_irq[i], &mask);
+
+		iocache->txcomp_irq[i] = irq_of_parse_and_map(node, tx_index);
+		if (!iocache->txcomp_irq[i]) {
+			dev_err(dev, "Failed to parse TX_COMP IRQ from DT\n");
+			return -EINVAL;
+		}
+		
+		dev_info(dev, "Requesting TX_COMP IRQ %d\n", iocache->txcomp_irq[i]);
+		err = devm_request_irq(dev, iocache->txcomp_irq[i], iocache_isr_txcomp,
+				IRQF_SHARED | IRQF_NO_THREAD,
+				IOCACHE_NAME, iocache);
+		if (err) {
+			dev_err(dev, "could not obtain tx_comp irq %d\n", iocache->txcomp_irq[i]);
+			return err;
+		}
+		/* Force the core to steer TX IRQ to CPU i */
+		cpumask_clear(&mask);
+		cpumask_set_cpu(i, &mask);
+		irq_set_affinity(iocache->txcomp_irq[i], &mask);
 	}
 
 	return 0;
@@ -170,6 +175,63 @@ static int iocache_parse_addr(struct iocache_device *iocache) {
 	iocache->hw_regs_control_size = resource_size(&regs);       /* <-- save size  */
 
 	return 0;
+}
+
+static int init_udp_rings(struct iocache_device *iocache) {
+	struct device *dev = iocache->dev;
+	int ret = 0;
+	size_t delta;
+
+	for (uint32_t i = 0; i < IOCACHE_CACHE_ENTRY_COUNT; i++) {
+		// Allocate DMA buffer UDP TX
+		iocache->dma_region_len_udp_tx[i] = IOCACHE_UDP_RING_SIZE;
+		iocache->dma_region_udp_tx[i] = dma_alloc_coherent(dev, iocache->dma_region_len_udp_tx[i] + (ALIGN_BYTES - 1), 
+													&iocache->dma_region_addr_udp_tx[i], GFP_KERNEL | __GFP_ZERO);
+		if (!iocache->dma_region_udp_tx[i]) {
+			dev_err(dev, "Failed to allocate DMA buffer UDP TX (%u)", i);
+			ret = -ENOMEM;
+			break;
+		}
+		iocache->dma_region_addr_udp_tx_aligned[i] = ALIGN(iocache->dma_region_addr_udp_tx[i], ALIGN_BYTES);
+		delta       	= iocache->dma_region_addr_udp_tx_aligned[i] - iocache->dma_region_addr_udp_tx[i];
+		iocache->dma_region_udp_tx_aligned[i] 		= (void *)((uintptr_t)iocache->dma_region_udp_tx[i] + delta);
+
+		dev_info(dev, "Allocated DMA UDP_TX region (%u) virt %p, phys %p", i, 
+				iocache->dma_region_udp_tx_aligned[i], (void *)iocache->dma_region_addr_udp_tx_aligned[i]);
+		
+		// Allocate DMA buffer UDP RX
+		iocache->dma_region_len_udp_rx[i] = IOCACHE_UDP_RING_SIZE;
+		iocache->dma_region_udp_rx[i] = dma_alloc_coherent(dev, iocache->dma_region_len_udp_rx[i] + (ALIGN_BYTES - 1), 
+													&iocache->dma_region_addr_udp_rx[i], GFP_KERNEL | __GFP_ZERO);
+		if (!iocache->dma_region_udp_rx[i]) {
+			dev_err(dev, "Failed to allocate DMA buffer UDP RX (%u)", i);
+			ret = -ENOMEM;
+			break;
+		}
+		iocache->dma_region_addr_udp_rx_aligned[i] = ALIGN(iocache->dma_region_addr_udp_rx[i], ALIGN_BYTES);
+		delta       	= iocache->dma_region_addr_udp_rx_aligned[i] - iocache->dma_region_addr_udp_rx[i];
+		iocache->dma_region_udp_rx_aligned[i] 		= (void *)((uintptr_t)iocache->dma_region_udp_rx[i] + delta);
+
+		dev_info(dev, "Allocated DMA UDP_RX region (%u) virt %p, phys %p", i,
+				iocache->dma_region_udp_rx_aligned[i], (void *)iocache->dma_region_addr_udp_rx_aligned[i]);
+	}
+
+	return ret;
+}
+
+static void populate_ring_info(struct iocache_device *iocache) {
+	for (uint32_t i = 0; i < IOCACHE_CACHE_ENTRY_COUNT; i++) {
+		iowrite64(0, 		  		 	 REG(iocache->iomem, IOCACHE_REG_ENABLED(i)));
+		/* RX */
+		u64 rx_base = (u64)iocache->dma_region_addr_udp_rx_aligned[i];
+		iowrite64(rx_base, 		  		 REG(iocache->iomem, IOCACHE_REG_RX_RING_ADDR(i)));
+		iowrite32(IOCACHE_UDP_RING_SIZE, REG(iocache->iomem, IOCACHE_REG_RX_RING_SIZE(i)));
+
+		/* TX ring */
+		u64 tx_base = (u64)iocache->dma_region_addr_udp_tx_aligned[i];
+		iowrite64(tx_base, 		  		 REG(iocache->iomem, IOCACHE_REG_TX_RING_ADDR(i)));
+		iowrite32(IOCACHE_UDP_RING_SIZE, REG(iocache->iomem, IOCACHE_REG_TX_RING_SIZE(i)));
+	}
 }
 
 static int iocache_probe(struct platform_device *pdev) {
@@ -202,12 +264,13 @@ static int iocache_probe(struct platform_device *pdev) {
 	spin_lock_init(&iocache->ev_lock);
 	u64_stats_init(&iocache->syncp);
 
-	// init_waitqueue_head(&iocache->wq);
-    // atomic_set(&iocache->ready, 0);
+	register_iocache_forall(iocache->iomem);
 
-	WRITE_ONCE(iocache->ready, 0);
-	WRITE_ONCE(iocache->wait_task, NULL);
-	WRITE_ONCE(iocache->armed, 0);
+	ret = init_udp_rings(iocache);
+	if (ret != 0) {
+		return ret;
+	}
+	populate_ring_info(iocache);
 
 	// plic_unregister_fast_path(iocache);
 	if ((ret = plic_register_fast_path(iocache, iocache_isr_rx, iocache_isr_txcomp)) != 0)
@@ -220,15 +283,7 @@ static int iocache_probe(struct platform_device *pdev) {
 	iocache->misc_dev.parent = dev;
 
 	ret = misc_register(&iocache->misc_dev);
-	if (ret) {
-		dev_err(dev, "Failed to register misc device");
-		free_irq(iocache->rx_irq, dev);
-		free_irq(iocache->txcomp_irq, dev);
-		return ret;
-	}
-	else {
-		dev_info(dev, "Misc registered :)");
-	}
+	dev_info(dev, "Misc registered :)");
 
 	return 0;
 }
@@ -246,7 +301,26 @@ static int iocache_remove(struct platform_device *pdev) {
 
     misc_deregister(&iocache->misc_dev);
 
-	clear_intmask_rx(iocache, IOCACHE_INTMASK_BOTH);
+	for (uint32_t i = 0; i < NUM_CPUS; i++) {
+		clear_intmask_rx(iocache, i);
+		clear_intmask_txcomp(iocache, i);
+	}
+
+	
+	// TODO: unregister iocache for rq
+
+	for (uint32_t i = 0; i < IOCACHE_CACHE_ENTRY_COUNT; i++) {
+		if (iocache->dma_region_udp_rx[i])
+			dma_free_coherent(dev, 
+				iocache->dma_region_len_udp_rx[i] + (ALIGN_BYTES - 1), 
+				iocache->dma_region_udp_rx[i], 
+				iocache->dma_region_addr_udp_rx[i]);
+		if (iocache->dma_region_udp_tx[i])
+			dma_free_coherent(dev, 
+				iocache->dma_region_len_udp_tx[i] + (ALIGN_BYTES - 1), 
+				iocache->dma_region_udp_tx[i], 
+				iocache->dma_region_addr_udp_tx[i]);
+	}
 
 	return 0;
 }

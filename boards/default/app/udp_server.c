@@ -46,7 +46,7 @@ int main() {
             continue;
         }
 
-        // usleep(1 * 1000);
+        // usleep(10 * 1000);
 
         // printf("Received %zd bytes\n", n);
         if (n > 0) {

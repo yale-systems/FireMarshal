@@ -14,25 +14,28 @@
 
 static enum hrtimer_restart iocache_timeout_cb(struct hrtimer *t)
 {
-    struct iocache_device *dev = container_of(t, struct iocache_device, to_hrtimer);
-    struct task_struct *tsk;
+    struct task_struct *tsk = container_of(t, struct task_struct, to_hrtimer);
 
-    /* Ensure we only proceed if the arming flag is still set. */
-    if (!smp_load_acquire(&dev->armed)) 
+    if (!tsk || (tsk && task_is_running(tsk))) {
         return HRTIMER_NORESTART;
-
-    tsk = READ_ONCE(dev->wait_task);
-    if (!tsk || (tsk && task_is_running(tsk)))
-        return HRTIMER_NORESTART;
+	}
+	
+	// int cpu = smp_processor_id();
+	// printk(KERN_INFO "Timer hit, cacheID=%d, cpu=%d\n", tsk->iocache_id, cpu);
 
     /* Wake it */
+	iowrite8 (0, 	REG(tsk->iocache_iomem, IOCACHE_REG_RX_SUSPENDED(tsk->iocache_id)));
+	mmiowb();
+
 	WRITE_ONCE(tsk->__state, TASK_RUNNING);
 	set_tsk_need_resched(current);  
+
 
     return HRTIMER_NORESTART;
 }
 
 static int iocache_misc_open(struct inode *inode, struct file *file) {
+	// printk(KERN_INFO "Openning iocache-misc\n");
     struct iocache_device *iocache = container_of(file->private_data, struct iocache_device, misc_dev);
 
 	// Sanity check
@@ -43,15 +46,6 @@ static int iocache_misc_open(struct inode *inode, struct file *file) {
 	} 
 
     file->private_data = iocache;
-
-	/* Publish waiter then arm ISR wake; order matters */
-	sched_force_next_local(current);
-	WRITE_ONCE(iocache->wait_task, current);
-	smp_wmb();                      // publish tsk before arming
-
-	hrtimer_init(&iocache->to_hrtimer, CLOCK_MONOTONIC, HRTIMER_MODE_REL_PINNED);
-	iocache->to_hrtimer.function = iocache_timeout_cb;
-	iocache->to_period = ktime_set(1, 0); // 1 second 
 
     return 0;
 }
@@ -75,6 +69,8 @@ static int iocache_misc_open(struct inode *inode, struct file *file) {
 
 static int iocache_misc_release(struct inode *inode, struct file *filp)
 {
+	// printk(KERN_INFO "Releasing iocache-misc: id=%d\n", current->iocache_id);
+
     struct iocache_device *iocache = filp->private_data;
 
     if (iocache) {
@@ -100,14 +96,6 @@ static int iocache_misc_release(struct inode *inode, struct file *filp)
 	// wake_up_process_iocache(current);
 	// __set_current_state(TASK_IOCACHE_SPECIAL);
 	// schedule();
-
-	wake_up_process_iocache(current);
-	WRITE_ONCE(iocache->wait_task, NULL);
-	schedule();
-
-	// iocache_print_cpu_util();
-	// printk(KERN_INFO "\nIOCACHE Released successfull\n");
-	sched_force_next_local(NULL);
 
     return 0;
 }
@@ -224,44 +212,93 @@ static long iocache_misc_ioctl(struct file *file, unsigned int cmd, unsigned lon
             return -EFAULT;
         return 0;
     } else if (cmd == IOCACHE_IOCTL_WAIT_READY) {
-		/* Fast path: event already present */
-		if (READ_ONCE(iocache->ready)) {
-			WRITE_ONCE(iocache->ready, 0);
-			// iocache->syscall_time = ktime_get_mono_fast_ns();
-			return 0;
-		}
-
 		/* Prepare to sleep (interruptible) */
+		int row = READ_ONCE(current->iocache_id);
 		set_current_state(TASK_INTERRUPTIBLE);
 
-		WRITE_ONCE(iocache->armed, 1);
+		iowrite8 (1, 	REG(iocache->iomem, IOCACHE_REG_RX_SUSPENDED(row)));
+		iowrite8 (1, 	REG(iocache->iomem, IOCACHE_REG_ENABLED(row)));
+		mmiowb();
 
-		/* Recheck after arming to avoid lost wake between checks */
-		if (READ_ONCE(iocache->ready)) {
-			__set_current_state(TASK_RUNNING);
-			WRITE_ONCE(iocache->armed, 0);
-			WRITE_ONCE(iocache->ready, 0);
-			// iocache->syscall_time = ktime_get_mono_fast_ns();
-			return 0;
-		}
+		// printk(KERN_INFO "starting wait: id=%d\n", row);
 
 		/* Start a pinned hrtimer for the timeout on this CPU */
-    	hrtimer_start(&iocache->to_hrtimer, iocache->to_period, HRTIMER_MODE_REL_PINNED);
+    	hrtimer_start(&current->to_hrtimer, current->to_period, HRTIMER_MODE_REL_PINNED);
 		/* Sleep;
 		 * Timeout will wake us via wake_up_process()
 		 * Device interrupt will set current to TASK_RUNNING and run this
 		 */
 		schedule();
 		__set_current_state(TASK_RUNNING);
-		hrtimer_cancel(&iocache->to_hrtimer);
+
+		// printk(KERN_INFO "stopping wait: id=%d\n", row);
+
+		iowrite8 (0, 	REG(iocache->iomem, IOCACHE_REG_RX_SUSPENDED(row)));
+		mmiowb();
+
+		hrtimer_cancel(&current->to_hrtimer);
 
 		// iocache->syscall_time = ktime_get_mono_fast_ns();
 
-
-		/* Running again: clean up publication on every path */
-		WRITE_ONCE(iocache->armed, 0);
-		WRITE_ONCE(iocache->ready, 0);
 		return 0;
+	} else if (cmd == IOCACHE_IOCTL_GET_AVAIL_RING) {
+		int row = current->iocache_id;
+
+        if (copy_to_user((void __user *)arg, &row, sizeof(row)))
+            return -EFAULT;
+        return 0;
+	} else if (cmd == IOCACHE_IOCTL_RUN_SCHEDULER) {
+		int row;
+		int cpu = smp_processor_id();
+
+		// row = ioread32(REG(iocache->iomem, IOCACHE_REG_ALLOC_FIRST_EMPTY));
+		row = 20;
+
+		WRITE_ONCE(current->iocache_id, row);
+		WRITE_ONCE(current->iocache_iomem, iocache->iomem);
+
+		// printk(KERN_INFO "Starting Scheduler: id=%d, cpu=%d\n", row, cpu);
+		
+		iowrite32(cpu, 							REG(iocache->iomem, IOCACHE_REG_PROC_CPU(row)));
+		iowrite64((u64) (uintptr_t) current, 	REG(iocache->iomem, IOCACHE_REG_PROC_PTR(row)));
+		iowrite8 (1, 							REG(iocache->iomem, IOCACHE_REG_ENABLED(row)));
+		mmiowb();
+
+		// printk(KERN_INFO "Wrote CPU info: %llu\n Actual PTR info: %llu", 
+				// ioread64(REG(iocache->iomem, IOCACHE_REG_PROC_PTR(row))),
+				// (u64) (uintptr_t) current);
+		
+
+		/* diactivate thread; order matters */
+		sched_force_next_local(current);
+
+		smp_wmb();                      // publish tsk before arming
+
+		hrtimer_init(&current->to_hrtimer, CLOCK_MONOTONIC, HRTIMER_MODE_REL_PINNED);
+		current->to_hrtimer.function = iocache_timeout_cb;
+		current->to_period = ktime_set(0, 1e8); // 100ms 
+
+        return 0;
+	} else if (cmd == IOCACHE_IOCTL_STOP_SCHEDULER) {
+		int row = current->iocache_id;
+		
+		// int cpu = smp_processor_id();
+		// printk(KERN_INFO "Stopping Scheduler: id=%d, cpu=%d\n", row, cpu);
+
+		wake_up_process_iocache(current);
+		// schedule();
+
+		WRITE_ONCE(current->is_iocache_managed, false);
+
+		iowrite8 (0, 							REG(iocache->iomem, IOCACHE_REG_ENABLED(row)));
+		iowrite32(0, 							REG(iocache->iomem, IOCACHE_REG_PROC_CPU(row)));
+		iowrite64(0, 							REG(iocache->iomem, IOCACHE_REG_PROC_PTR(row)));
+		mmiowb();
+		
+		sched_force_next_local(NULL);
+
+		hrtimer_cancel(&current->to_hrtimer);
+        return 0;
 	}
 
 	return -EINVAL;
@@ -272,6 +309,8 @@ static int iocache_misc_mmap(struct file *file, struct vm_area_struct *vma) {
 
 	int index;
 	u64 pgoff, req_len, req_start;
+	unsigned long phys = 0;
+	unsigned long psize;
 
 	index = vma->vm_pgoff >> (40 - PAGE_SHIFT);
 	req_len = vma->vm_end - vma->vm_start;
@@ -296,8 +335,57 @@ static int iocache_misc_mmap(struct file *file, struct vm_area_struct *vma) {
 				req_len, pgprot_noncached(vma->vm_page_prot));
     }
     default:
-        dev_err(iocache->dev, "%s: unknown region index=%d pgoff=0x%lx\n",
+		break;
+    }
+
+	if (index >= 1 + 2 * IOCACHE_CACHE_ENTRY_COUNT || index <= 0) {
+		dev_err(iocache->dev, "%s: unknown region index=%d pgoff=0x%lx\n",
                 __func__, index, vma->vm_pgoff);
         return -EINVAL;
-    }
+	}
+
+	if (index % 2 == 0) {
+		// We should map RX
+		int ring_idx = (index - 2) / 2;
+
+		phys = virt_to_phys(iocache->dma_region_udp_rx[ring_idx]);  // Convert virtual to physical address
+        psize = iocache->dma_region_len_udp_rx[ring_idx];
+
+		if (req_len > psize)
+		{
+			printk("*** 3: req_len = %llu,  psize = %lu *** \n", req_len, psize);
+			return -EINVAL;
+		}
+
+		vm_flags_mod(vma, VM_IO | VM_DONTEXPAND | VM_DONTDUMP, 0);
+		vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
+		vma->vm_pgoff = 0;
+		
+		return dma_mmap_coherent(iocache->dev, vma, 
+									iocache->dma_region_udp_rx[ring_idx], 
+									iocache->dma_region_addr_udp_rx[ring_idx], 
+									req_len);
+	}
+	else {
+		// MMAP TX
+		int ring_idx = (index - 1) / 2;
+
+		phys = virt_to_phys(iocache->dma_region_udp_tx[ring_idx]);  // Convert virtual to physical address
+        psize = iocache->dma_region_len_udp_tx[ring_idx];
+
+		if (req_len > psize)
+		{
+			printk("*** 2: req_len = %llu,  psize = %lu *** \n", req_len, psize);
+			return -EINVAL;
+		}
+
+		vm_flags_mod(vma, VM_IO | VM_DONTEXPAND | VM_DONTDUMP, 0);
+		vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
+		vma->vm_pgoff = 0;
+		
+		return dma_mmap_coherent(iocache->dev, vma, 
+									iocache->dma_region_udp_tx[ring_idx], 
+									iocache->dma_region_addr_udp_tx[ring_idx], 
+									req_len);
+	}
 }

@@ -630,37 +630,22 @@ static void accnet_init_mac_address(struct net_device *ndev)
 static void init_udp_engine(struct net_device *ndev) {
 	struct accnet_device *nic = netdev_priv(ndev);
 
-	/* RX */
-	u64 rx_base = (u64)nic->dma_region_addr_udp_rx_aligned;
-	iowrite64(rx_base, 		  		 REG(nic->iomem_udp_rx, ACCNET_UDP_RX_RING_BASE));
-	iowrite32(ACCNET_UDP_RING_SIZE,  REG(nic->iomem_udp_rx, ACCNET_UDP_RX_RING_SIZE));
-	iowrite32(0,              		 REG(nic->iomem_udp_rx, ACCNET_UDP_RX_RING_HEAD));
-	iowrite32(0,              		 REG(nic->iomem_udp_rx, ACCNET_UDP_RX_RING_TAIL));
+	for (uint32_t i = 0; i < ACCNET_UDP_RING_COUNT; i++) {
+		/* RX ring */
+		iowrite32(0,              		 REG(nic->iomem_udp_rx, ACCNET_UDP_RX_RING_HEAD(i)));
+		iowrite32(0,              		 REG(nic->iomem_udp_rx, ACCNET_UDP_RX_RING_TAIL(i)));
+		/* TX ring */
+		iowrite32(0,              		 REG(nic->iomem_udp_tx, ACCNET_UDP_TX_RING_HEAD(i)));
+		iowrite32(0,              		 REG(nic->iomem_udp_tx, ACCNET_UDP_TX_RING_TAIL(i)));
+	}
 
-	/* TX ring */
-	u64 tx_base = (u64)nic->dma_region_addr_udp_tx_aligned;
-	iowrite64(tx_base, 		  		 REG(nic->iomem_udp_tx, ACCNET_UDP_TX_RING_BASE));
-	iowrite32(ACCNET_UDP_RING_SIZE,  REG(nic->iomem_udp_tx, ACCNET_UDP_TX_RING_SIZE));
-	iowrite32(0,              		 REG(nic->iomem_udp_tx, ACCNET_UDP_TX_RING_HEAD));
-	iowrite32(0,              		 REG(nic->iomem_udp_tx, ACCNET_UDP_TX_RING_TAIL));
-	iowrite16(1472,           		 REG(nic->iomem_udp_tx, ACCNET_UDP_TX_MTU));
-
-	/* TX header fields */
-	iowrite64(0x00112233445566ULL, REG(nic->iomem_udp_tx, ACCNET_UDP_TX_HDR_MAC_SRC)); /* 48-bit in 64-bit reg */
-	iowrite64(0x00887766554433ULL, REG(nic->iomem_udp_tx, ACCNET_UDP_TX_HDR_MAC_DST)); /* 48-bit in 64-bit reg */
-
-	iowrite32(0x0a000002, REG(nic->iomem_udp_tx, ACCNET_UDP_TX_HDR_IP_SRC)); /* 10.0.0.2 */
-	iowrite32(0x0a000001, REG(nic->iomem_udp_tx, ACCNET_UDP_TX_HDR_IP_DST)); /* 10.0.0.1 */
+	iowrite16(1472,           		REG(nic->iomem_udp_tx, ACCNET_UDP_TX_MTU));
+	iowrite64(0x00112233445566ULL, 	REG(nic->iomem_udp_tx, ACCNET_UDP_TX_HDR_MAC_SRC)); /* 48-bit in 64-bit reg */
+	iowrite64(0x00887766554433ULL, 	REG(nic->iomem_udp_tx, ACCNET_UDP_TX_HDR_MAC_DST)); /* 48-bit in 64-bit reg */
 
 	iowrite8(0,     REG(nic->iomem_udp_tx, ACCNET_UDP_TX_HDR_IP_TOS));
 	iowrite8(64,    REG(nic->iomem_udp_tx, ACCNET_UDP_TX_HDR_IP_TTL));
 	iowrite16(0,    REG(nic->iomem_udp_tx, ACCNET_UDP_TX_HDR_IP_ID));
-
-	iowrite16(1111, REG(nic->iomem_udp_tx, ACCNET_UDP_TX_HDR_UDP_SRC_PORT));
-	iowrite16(1234, REG(nic->iomem_udp_tx, ACCNET_UDP_TX_HDR_UDP_DST_PORT));
-	/* If your HW supports writing a UDP checksum value directly:
-	* iowrite16(1500, REG(nic->iomem_udp_tx, ACCNET_UDP_TX_HDR_UDP_CSUM));
-	*/
 
 	wmb();  // order prior MMIO writes before subsequent MMIO/unmask
 }
@@ -685,7 +670,6 @@ static int accnet_probe(struct platform_device *pdev)
 	struct net_device *ndev;
 	struct accnet_device *nic;
 	int ret;
-	size_t delta;
 
 	if (!dev->of_node)
 		return -ENODEV;
@@ -738,38 +722,6 @@ static int accnet_probe(struct platform_device *pdev)
 			ndev->dev_addr[4],
 			ndev->dev_addr[5]);
 
-	// Allocate DMA buffer UDP TX
-	nic->dma_region_len_udp_tx = ACCNET_UDP_RING_SIZE;
-	nic->dma_region_udp_tx = dma_alloc_coherent(dev, nic->dma_region_len_udp_tx + (ALIGN_BYTES - 1), 
-												&nic->dma_region_addr_udp_tx, GFP_KERNEL | __GFP_ZERO);
-	if (!nic->dma_region_udp_tx) {
-		dev_err(dev, "Failed to allocate DMA buffer UDP TX");
-		ret = -ENOMEM;
-		goto fail_dma_alloc_tx;
-	}
-	nic->dma_region_addr_udp_tx_aligned = ALIGN(nic->dma_region_addr_udp_tx, ALIGN_BYTES);
-	delta       	= nic->dma_region_addr_udp_tx_aligned - nic->dma_region_addr_udp_tx;
-	nic->dma_region_udp_tx_aligned 		= (void *)((uintptr_t)nic->dma_region_udp_tx + delta);
-
-	dev_info(dev, "Allocated DMA UDP_TX region virt %p, phys %p", 
-			nic->dma_region_udp_tx_aligned, (void *)nic->dma_region_addr_udp_tx_aligned);
-	
-	// Allocate DMA buffer UDP RX
-	nic->dma_region_len_udp_rx = ACCNET_UDP_RING_SIZE;
-	nic->dma_region_udp_rx = dma_alloc_coherent(dev, nic->dma_region_len_udp_rx + (ALIGN_BYTES - 1), 
-												&nic->dma_region_addr_udp_rx, GFP_KERNEL | __GFP_ZERO);
-	if (!nic->dma_region_udp_rx) {
-		dev_err(dev, "Failed to allocate DMA buffer UDP RX");
-		ret = -ENOMEM;
-		goto fail_dma_alloc;
-	}
-	nic->dma_region_addr_udp_rx_aligned = ALIGN(nic->dma_region_addr_udp_rx, ALIGN_BYTES);
-	delta       	= nic->dma_region_addr_udp_rx_aligned - nic->dma_region_addr_udp_rx;
-	nic->dma_region_udp_rx_aligned 		= (void *)((uintptr_t)nic->dma_region_udp_rx + delta);
-
-	dev_info(dev, "Allocated DMA UDP_RX region virt %p, phys %p", 
-			nic->dma_region_udp_rx_aligned, (void *)nic->dma_region_addr_udp_rx_aligned);
-
 	// Register the misc device
 	// Initialize the miscdevice structure
     nic->misc_dev.minor = MISC_DYNAMIC_MINOR;
@@ -790,10 +742,6 @@ static int accnet_probe(struct platform_device *pdev)
 	return 0;
 
 fail_misc_register:
-	dma_free_coherent(dev, nic->dma_region_len_udp_tx + (ALIGN_BYTES - 1), nic->dma_region_udp_tx, nic->dma_region_addr_udp_tx);
-fail_dma_alloc:
-	dma_free_coherent(dev, nic->dma_region_len_udp_rx + (ALIGN_BYTES - 1), nic->dma_region_udp_rx, nic->dma_region_addr_udp_rx);
-fail_dma_alloc_tx:
 	return ret;
 }
 
@@ -816,19 +764,6 @@ static int accnet_remove(struct platform_device *pdev)
 
     /* defensively mask device interrupts */
     clear_intmask(nic, ACCNET_INTMASK_BOTH);
-
-    /* free coherent DMA buffers we allocated in probe */
-    if (nic->dma_region_udp_tx)
-        dma_free_coherent(nic->dev,
-                          nic->dma_region_len_udp_tx + (ALIGN_BYTES - 1),
-                          nic->dma_region_udp_tx,
-                          nic->dma_region_addr_udp_tx);
-
-    if (nic->dma_region_udp_rx)
-        dma_free_coherent(nic->dev,
-                          nic->dma_region_len_udp_rx + (ALIGN_BYTES - 1),
-                          nic->dma_region_udp_rx,
-                          nic->dma_region_addr_udp_rx);
 
     return 0;
 }
