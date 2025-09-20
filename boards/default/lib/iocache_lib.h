@@ -12,6 +12,7 @@
 #define NUM_CPUS 	NR_CPUS
 
 #define IOCACHE_CACHE_ENTRY_COUNT		64
+#define IOCACHE_UDP_RING_SIZE 			8 * 1024 		// 8KB   Should be half the value in driver
 
 /* ---- Sub-block bases (must match Scala) ---- */
 #define IOCACHE_INT_BASE     0x000UL
@@ -24,31 +25,31 @@
 #define IOCACHE_BEAT_BYTES   8UL
 #define IOCACHE_ROW_STRIDE   0x100UL  /* 256B = 32 beats */
 
-/* ==== Per-CPU Interrupt Masks ====
- * For CPU c at INT_BASE + 0x10*c:
- *   +0x00: int_mask_rx[c]     (1 bit)
- *   +0x08: int_mask_txcomp[c] (1 bit)
- */
-#define IOCACHE_REG_INTMASK_RX(c)     	 (IOCACHE_INT_BASE  + (0x10UL*(c)) + 0x00UL)
-#define IOCACHE_REG_INTMASK_TXCOMP(c)    (IOCACHE_INT_BASE  + (0x10UL*(c)) + 0x08UL)
+// /* ==== Per-CPU Interrupt Masks ====
+//  * For CPU c at INT_BASE + 0x10*c:
+//  *   +0x00: int_mask_rx[c]     (1 bit)
+//  *   +0x08: int_mask_txcomp[c] (1 bit)
+//  */
+// #define IOCACHE_REG_INTMASK_RX(c)     	 (IOCACHE_INT_BASE  + (0x10UL*(c)) + 0x00UL)
+// #define IOCACHE_REG_INTMASK_TXCOMP(c)    (IOCACHE_INT_BASE  + (0x10UL*(c)) + 0x08UL)
 
-/* ==== Per-CPU Scheduler ====
- * For CPU c at SCHED_BASE + 0x10*c:
- *   +0x00: SCHED_READ[c]  (64-bit, advances RR)
- *   +0x08: SCHED_PEEK[c]  (64-bit, no advance)
- */
-#define IOCACHE_REG_SCHED_READ(c)      (IOCACHE_SCHED_BASE + (0x10UL*(c)) + 0x00UL)
-#define IOCACHE_REG_SCHED_PEEK(c)      (IOCACHE_SCHED_BASE + (0x10UL*(c)) + 0x08UL)
+// /* ==== Per-CPU Scheduler ====
+//  * For CPU c at SCHED_BASE + 0x10*c:
+//  *   +0x00: SCHED_READ[c]  (64-bit, advances RR)
+//  *   +0x08: SCHED_PEEK[c]  (64-bit, no advance)
+//  */
+// #define IOCACHE_REG_SCHED_READ(c)      (IOCACHE_SCHED_BASE + (0x10UL*(c)) + 0x00UL)
+// #define IOCACHE_REG_SCHED_PEEK(c)      (IOCACHE_SCHED_BASE + (0x10UL*(c)) + 0x08UL)
 
-/* ==== RX Kick-All (by CPU) ==== */
-#define IOCACHE_REG_RX_KICK_ALL_CPU     (IOCACHE_KICK_BASE + 0x00UL) /* WO 32b */
-#define IOCACHE_REG_RX_KICK_ALL_COUNT   (IOCACHE_KICK_BASE + 0x08UL) /* RO */
-#define IOCACHE_REG_RX_KICK_ALL_MASK    (IOCACHE_KICK_BASE + 0x10UL) /* RO */
+// /* ==== RX Kick-All (by CPU) ==== */
+// #define IOCACHE_REG_RX_KICK_ALL_CPU     (IOCACHE_KICK_BASE + 0x00UL) /* WO 32b */
+// #define IOCACHE_REG_RX_KICK_ALL_COUNT   (IOCACHE_KICK_BASE + 0x08UL) /* RO */
+// #define IOCACHE_REG_RX_KICK_ALL_MASK    (IOCACHE_KICK_BASE + 0x10UL) /* RO */
 
-/* ==== Allocator (first empty row) ==== 
- * +0x00: FIRST_EMPTY_ROW (RO, 32b). Returns: 0 if none.
- */
-#define IOCACHE_REG_ALLOC_FIRST_EMPTY   (IOCACHE_ALLOC_BASE + 0x00UL)
+// /* ==== Allocator (first empty row) ==== 
+//  * +0x00: FIRST_EMPTY_ROW (RO, 32b). Returns: 0 if none.
+//  */
+// #define IOCACHE_REG_ALLOC_FIRST_EMPTY   (IOCACHE_ALLOC_BASE + 0x00UL)
 
 /* ==== Row field offsets (relative to row base) ==== 
  * Beat i offset = i * IOCACHE_BEAT_BYTES
@@ -77,19 +78,19 @@
     (IOCACHE_TABLE_BASE + (row) * IOCACHE_ROW_STRIDE + (off))
 
 /* Convenience macros */
-#define IOCACHE_REG_ENABLED(row)          IOCACHE_REG((row), IOCACHE_ENABLED_OFF)
+// #define IOCACHE_REG_ENABLED(row)          IOCACHE_REG((row), IOCACHE_ENABLED_OFF)
 #define IOCACHE_REG_PROTOCOL(row)         IOCACHE_REG((row), IOCACHE_PROTOCOL_OFF)
 #define IOCACHE_REG_SRC_IP(row)           IOCACHE_REG((row), IOCACHE_SRC_IP_OFF)
 #define IOCACHE_REG_SRC_PORT(row)         IOCACHE_REG((row), IOCACHE_SRC_PORT_OFF)
 #define IOCACHE_REG_DST_IP(row)           IOCACHE_REG((row), IOCACHE_DST_IP_OFF)
 #define IOCACHE_REG_DST_PORT(row)         IOCACHE_REG((row), IOCACHE_DST_PORT_OFF)
 #define IOCACHE_REG_RX_AVAILABLE(row)     IOCACHE_REG((row), IOCACHE_RX_AVAILABLE_OFF)
-#define IOCACHE_REG_RX_SUSPENDED(row)     IOCACHE_REG((row), IOCACHE_RX_SUSPENDED_OFF)
+// #define IOCACHE_REG_RX_SUSPENDED(row)     IOCACHE_REG((row), IOCACHE_RX_SUSPENDED_OFF)
 #define IOCACHE_REG_TXCOMP_AVAILABLE(row) IOCACHE_REG((row), IOCACHE_TXCOMP_AVAILABLE_OFF)
-#define IOCACHE_REG_TXCOMP_SUSPENDED(row) IOCACHE_REG((row), IOCACHE_TXCOMP_SUSPENDED_OFF)
+// #define IOCACHE_REG_TXCOMP_SUSPENDED(row) IOCACHE_REG((row), IOCACHE_TXCOMP_SUSPENDED_OFF)
 #define IOCACHE_REG_FLAGS_RO(row)         IOCACHE_REG((row), IOCACHE_FLAGS_RO_OFF)
 #define IOCACHE_REG_CONN_ID(row)          IOCACHE_REG((row), IOCACHE_CONN_ID_OFF)
-// #define IOCACHE_REG_PROC_PTR(row)         IOCACHE_REG((row), IOCACHE_PROC_PTR_OFF)
+// #define IOCACHE_REG_PROC_PTR(row)         IOCACHE_REG((row), IOCACHE_PROC_PTR_OFF) 
 // #define IOCACHE_REG_PROC_CPU(row)         IOCACHE_REG((row), IOCACHE_PROC_CPU_OFF)
 #define IOCACHE_REG_RX_RING_ADDR(row)     IOCACHE_REG((row), IOCACHE_RX_RING_ADDR_OFF)
 #define IOCACHE_REG_RX_RING_SIZE(row)     IOCACHE_REG((row), IOCACHE_RX_RING_SIZE_OFF)
@@ -97,9 +98,10 @@
 #define IOCACHE_REG_TX_RING_SIZE(row)     IOCACHE_REG((row), IOCACHE_TX_RING_SIZE_OFF)
 
 
+#define ALIGN 64
+
 struct iocache_info {
     int fd;
-    size_t ALIGN;
     
     off_t regs_offset;
     size_t regs_size;
@@ -113,10 +115,10 @@ struct iocache_info {
     size_t udp_tx_size;
     size_t udp_rx_size;
 
-    volatile uint8_t *regs;
+    bool scheduler_enabled;
+    bool is_ring_reserved;
 
-    int efd;
-    int ep;
+    volatile uint8_t *regs;
 };
 
 int iocache_open(char *file, struct iocache_info *iocache);
@@ -130,31 +132,8 @@ int iocache_print_proc_util(struct iocache_info *iocache);
 int iocache_start_scheduler(struct iocache_info *iocache);
 int iocache_stop_scheduler(struct iocache_info *iocache);
 
-static void _iocache_setup_connection(struct iocache_info *iocache, struct connection_info *entry, int row) {
-    reg_write8 (iocache->regs, IOCACHE_REG_PROTOCOL(row),    entry->protocol);
-    reg_write32(iocache->regs, IOCACHE_REG_SRC_IP(row),      entry->src_ip);
-    reg_write16(iocache->regs, IOCACHE_REG_SRC_PORT(row),    entry->src_port);
-    reg_write32(iocache->regs, IOCACHE_REG_DST_IP(row),      entry->dst_ip);
-    reg_write16(iocache->regs, IOCACHE_REG_DST_PORT(row),    entry->dst_port);
-    reg_write16(iocache->regs, IOCACHE_REG_CONN_ID(row),     entry->src_port);
-    
-    reg_write8 (iocache->regs, IOCACHE_REG_ENABLED(row),     1);
-    mmio_wmb();
-}
-
-static void iocache_setup_connection(struct iocache_info *iocache, struct connection_info *entry) {
-    _iocache_setup_connection(iocache, entry, iocache->row);
-}
-
-static void iocache_clear_connection(struct iocache_info *iocache) {
-    int row = iocache->row;
-    reg_write8 (iocache->regs, IOCACHE_REG_PROTOCOL(row),    0);
-    reg_write32(iocache->regs, IOCACHE_REG_SRC_IP(row),      0);
-    reg_write16(iocache->regs, IOCACHE_REG_SRC_PORT(row),    0);
-    reg_write32(iocache->regs, IOCACHE_REG_DST_IP(row),      0);
-    reg_write16(iocache->regs, IOCACHE_REG_DST_PORT(row),    0);
-    mmio_wmb();
-}
+void iocache_setup_connection(struct iocache_info *iocache, struct connection_info *entry);
+void iocache_clear_connection(struct iocache_info *iocache);
 
 static inline bool iocache_is_rx_available(struct iocache_info *iocache) {
     return reg_read8(iocache->regs, IOCACHE_REG_RX_AVAILABLE(iocache->row));

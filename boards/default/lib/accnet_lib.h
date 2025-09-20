@@ -11,7 +11,6 @@
 #include "common.h"
 
 /* =========================  UDP  =========================== */
-#define ACCNET_UDP_RING_SIZE 	32 * 1024 		// 64KB
 #define ACCNET_UDP_RING_COUNT	64
 
 /* ===================================================================== */
@@ -76,7 +75,6 @@ struct ring_info {
 
 struct accnet_info {
     int fd;
-    size_t ALIGN;
     
     off_t regs_offset, udp_tx_offset, udp_rx_offset;
     size_t regs_size, udp_tx_regs_size, udp_rx_regs_size;
@@ -89,10 +87,9 @@ struct accnet_info {
     struct ring_info ring;
 };
 
-int accnet_open(char *file, struct accnet_info *accnet, struct iocache_info *iocache, bool do_init);
+int accnet_open(char *file, struct accnet_info *accnet, struct iocache_info *iocache);
 int accnet_close(struct accnet_info *accnet);
 
-int accnet_start_ring(struct accnet_info *accnet);
 int accnet_setup_connection(struct accnet_info *accnet, struct connection_info *connection);
 
 uint64_t accnet_get_outside_ticks(struct accnet_info *accnet);

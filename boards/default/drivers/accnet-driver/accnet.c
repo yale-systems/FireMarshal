@@ -639,14 +639,6 @@ static void init_udp_engine(struct net_device *ndev) {
 		iowrite32(0,              		 REG(nic->iomem_udp_tx, ACCNET_UDP_TX_RING_TAIL(i)));
 	}
 
-	iowrite16(1472,           		REG(nic->iomem_udp_tx, ACCNET_UDP_TX_MTU));
-	iowrite64(0x00112233445566ULL, 	REG(nic->iomem_udp_tx, ACCNET_UDP_TX_HDR_MAC_SRC)); /* 48-bit in 64-bit reg */
-	iowrite64(0x00887766554433ULL, 	REG(nic->iomem_udp_tx, ACCNET_UDP_TX_HDR_MAC_DST)); /* 48-bit in 64-bit reg */
-
-	iowrite8(0,     REG(nic->iomem_udp_tx, ACCNET_UDP_TX_HDR_IP_TOS));
-	iowrite8(64,    REG(nic->iomem_udp_tx, ACCNET_UDP_TX_HDR_IP_TTL));
-	iowrite16(0,    REG(nic->iomem_udp_tx, ACCNET_UDP_TX_HDR_IP_ID));
-
 	wmb();  // order prior MMIO writes before subsequent MMIO/unmask
 }
 

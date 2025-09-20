@@ -23,13 +23,29 @@ static enum hrtimer_restart iocache_timeout_cb(struct hrtimer *t)
 	// int cpu = smp_processor_id();
 	// printk(KERN_INFO "Timer hit, cacheID=%d, cpu=%d\n", tsk->iocache_id, cpu);
 
+	if (!tsk->iocache_id_valid) {
+		printk(KERN_WARNING "Timer without a row!\n");
+	}
+
     /* Wake it */
 	iowrite8 (0, 	REG(tsk->iocache_iomem, IOCACHE_REG_RX_SUSPENDED(tsk->iocache_id)));
 	mmiowb();
 
-	WRITE_ONCE(tsk->__state, TASK_RUNNING);
 	set_tsk_need_resched(current);  
 
+    return HRTIMER_NORESTART;
+}
+
+static enum hrtimer_restart iocache_wakeup_timer(struct hrtimer *t)
+{
+    struct task_struct *tsk = container_of(t, struct task_struct, wakeup_hrtimer);
+
+    if (!tsk) {
+        return HRTIMER_NORESTART;
+	}
+	
+	wake_up_process(tsk);
+	set_tsk_need_resched(current); 
 
     return HRTIMER_NORESTART;
 }
@@ -67,36 +83,8 @@ static int iocache_misc_open(struct inode *inode, struct file *file) {
 // 	console_unlock();
 // } 
 
-static int iocache_misc_release(struct inode *inode, struct file *filp)
+static int iocache_misc_release(struct inode *inode, struct file *file)
 {
-	// printk(KERN_INFO "Releasing iocache-misc: id=%d\n", current->iocache_id);
-
-    struct iocache_device *iocache = filp->private_data;
-
-    if (iocache) {
-        struct eventfd_ctx *old = NULL;
-        spin_lock(&iocache->ev_lock);
-        old = iocache->ev_ctx;
-        iocache->ev_ctx = NULL;
-        spin_unlock(&iocache->ev_lock);
-        if (old) eventfd_ctx_put(old);
-    }
-
-	/* 
-	 * We need it to end a process correctly by re-adding it to ready queues. 
-	 * We call wake_up_process_iocache() that will automatically add our process to linux queues 
-	 * and we will unset force_next_local.
-	 */
-	// wake_up_process_iocache(current);
-	// sched_force_next_local(NULL);
-	// smp_wmb();
-	// schedule();
-
-	// wake_up_process(current);
-	// wake_up_process_iocache(current);
-	// __set_current_state(TASK_IOCACHE_SPECIAL);
-	// schedule();
-
     return 0;
 }
 
@@ -165,35 +153,7 @@ static long iocache_misc_ioctl(struct file *file, unsigned int cmd, unsigned lon
 			return -EINVAL;
 		}
 		return copy_to_user((void __user *)arg, &info, minsz) ? -EFAULT : 0;
-	} else if (cmd == IOCACHE_IOCTL_SET_EVENTFD) {
-        int efd;
-        struct eventfd_ctx *ctx, *old = NULL;
-
-        if (copy_from_user(&efd, (void __user *)arg, sizeof(efd)))
-            return -EFAULT;
-
-        /* allow -1 to clear */
-        if (efd == -1) {
-            spin_lock(&iocache->ev_lock);
-            old = iocache->ev_ctx;
-            iocache->ev_ctx = NULL;
-            spin_unlock(&iocache->ev_lock);
-            if (old) eventfd_ctx_put(old);
-            return 0;
-        }
-
-        ctx = eventfd_ctx_fdget(efd);   /* takes a ref */
-        if (IS_ERR(ctx))
-            return PTR_ERR(ctx);
-
-        spin_lock(&iocache->ev_lock);
-        old = iocache->ev_ctx;
-        iocache->ev_ctx = ctx;
-        spin_unlock(&iocache->ev_lock);
-
-        if (old) eventfd_ctx_put(old);
-        return 0;
-    } else if (cmd == IOCACHE_IOCTL_GET_KTIMES) {
+	} else if (cmd == IOCACHE_IOCTL_GET_KTIMES) {
 		u64 val[4] = {iocache->entry_ktime, iocache->claim_ktime, iocache->isr_ktime, iocache->syscall_time};
 		
         if (copy_to_user((void __user *)arg, &val, sizeof(val)))
@@ -211,93 +171,136 @@ static long iocache_misc_ioctl(struct file *file, unsigned int cmd, unsigned lon
         if (copy_to_user((void __user *)arg, &val, sizeof(val)))
             return -EFAULT;
         return 0;
-    } else if (cmd == IOCACHE_IOCTL_WAIT_READY) {
+    } else if (cmd == IOCACHE_IOCTL_WAIT_TIMEOUT) {
 		/* Prepare to sleep (interruptible) */
 		int row = READ_ONCE(current->iocache_id);
-		set_current_state(TASK_INTERRUPTIBLE);
 
 		iowrite8 (1, 	REG(iocache->iomem, IOCACHE_REG_RX_SUSPENDED(row)));
-		iowrite8 (1, 	REG(iocache->iomem, IOCACHE_REG_ENABLED(row)));
 		mmiowb();
 
 		// printk(KERN_INFO "starting wait: id=%d\n", row);
 
 		/* Start a pinned hrtimer for the timeout on this CPU */
-    	hrtimer_start(&current->to_hrtimer, current->to_period, HRTIMER_MODE_REL_PINNED);
+    	hrtimer_start(&current->to_hrtimer, current->to_period, HRTIMER_MODE_REL_PINNED_HARD);
 		/* Sleep;
 		 * Timeout will wake us via wake_up_process()
-		 * Device interrupt will set current to TASK_RUNNING and run this
 		 */
 		schedule();
-		__set_current_state(TASK_RUNNING);
+		hrtimer_cancel(&current->to_hrtimer);
 
 		// printk(KERN_INFO "stopping wait: id=%d\n", row);
 
 		iowrite8 (0, 	REG(iocache->iomem, IOCACHE_REG_RX_SUSPENDED(row)));
 		mmiowb();
 
-		hrtimer_cancel(&current->to_hrtimer);
 
 		// iocache->syscall_time = ktime_get_mono_fast_ns();
 
 		return 0;
-	} else if (cmd == IOCACHE_IOCTL_GET_AVAIL_RING) {
-		int row = current->iocache_id;
+	} else if (cmd == IOCACHE_IOCTL_RESERVE_RING) {
+		int row;
+		unsigned long flags;
+
+		spin_lock_irqsave(&iocache->row_alloc_lock, flags);
+
+		row = ioread32(	REG(iocache->iomem, IOCACHE_REG_ALLOC_FIRST_EMPTY));
+		uint8_t is_enabled = ioread8( REG(iocache->iomem, IOCACHE_REG_ENABLED(row) )); 
+
+		if (is_enabled) {
+			spin_unlock_irqrestore(&iocache->row_alloc_lock, flags);
+			printk(KERN_WARNING "No available rows in IOCache\n");
+			return -ENOMEM;
+		}
+		
+		iowrite8 (1, 	REG(iocache->iomem, IOCACHE_REG_ENABLED(row)));
+		smp_wmb();
+
+		WRITE_ONCE(current->iocache_id, 		row);
+		WRITE_ONCE(current->iocache_id_valid, 	true);
+
+		spin_unlock_irqrestore(&iocache->row_alloc_lock, flags);
 
         if (copy_to_user((void __user *)arg, &row, sizeof(row)))
             return -EFAULT;
+
         return 0;
-	} else if (cmd == IOCACHE_IOCTL_RUN_SCHEDULER) {
+	} else if (cmd == IOCACHE_IOCTL_FREE_RING) {
 		int row;
-		int cpu = smp_processor_id();
+		unsigned long flags;
 
-		// row = ioread32(REG(iocache->iomem, IOCACHE_REG_ALLOC_FIRST_EMPTY));
-		row = 20;
+		spin_lock_irqsave(&iocache->row_alloc_lock, flags);
 
-		WRITE_ONCE(current->iocache_id, row);
+		if (READ_ONCE(current->iocache_id_valid)) {
+			row = READ_ONCE(current->iocache_id);
+			iowrite8 (0, 							REG(iocache->iomem, IOCACHE_REG_ENABLED(row)));
+			smp_wmb();
+
+			WRITE_ONCE(current->iocache_id_valid, 	false);
+			WRITE_ONCE(current->iocache_id, 		0);
+		}
+
+		spin_unlock_irqrestore(&iocache->row_alloc_lock, flags);
+
+        return 0;
+	} else if (cmd == IOCACHE_IOCTL_START_SCHEDULER) {
+		int row;
+		int cpu;
+		unsigned long flags;
+
+		if (!READ_ONCE(current->iocache_id_valid)) {
+			printk(KERN_WARNING "no row initialized\n");
+			return -EPERM;
+		}
+
+		/* Keep this thread on the same CPU while we program it */
+		migrate_disable();
+		cpu = smp_processor_id();
+
+		spin_lock_irqsave(&iocache->sched_lock, flags);
+
 		WRITE_ONCE(current->iocache_iomem, iocache->iomem);
-
-		// printk(KERN_INFO "Starting Scheduler: id=%d, cpu=%d\n", row, cpu);
+		row = READ_ONCE(current->iocache_id);
 		
 		iowrite32(cpu, 							REG(iocache->iomem, IOCACHE_REG_PROC_CPU(row)));
 		iowrite64((u64) (uintptr_t) current, 	REG(iocache->iomem, IOCACHE_REG_PROC_PTR(row)));
-		iowrite8 (1, 							REG(iocache->iomem, IOCACHE_REG_ENABLED(row)));
-		mmiowb();
-
-		// printk(KERN_INFO "Wrote CPU info: %llu\n Actual PTR info: %llu", 
-				// ioread64(REG(iocache->iomem, IOCACHE_REG_PROC_PTR(row))),
-				// (u64) (uintptr_t) current);
-		
 
 		/* diactivate thread; order matters */
-		sched_force_next_local(current);
+		deactivate_process_iocache(current);
+		set_current_state(TASK_INTERRUPTIBLE);
 
-		smp_wmb();                      // publish tsk before arming
+		spin_unlock_irqrestore(&iocache->sched_lock, flags);
 
-		hrtimer_init(&current->to_hrtimer, CLOCK_MONOTONIC, HRTIMER_MODE_REL_PINNED);
+		hrtimer_init(&current->to_hrtimer, CLOCK_MONOTONIC, HRTIMER_MODE_REL_PINNED_HARD);
 		current->to_hrtimer.function = iocache_timeout_cb;
-		current->to_period = ktime_set(0, 1e8); // 100ms 
+		current->to_period = ktime_set(1, 0); // 1s 
 
         return 0;
 	} else if (cmd == IOCACHE_IOCTL_STOP_SCHEDULER) {
-		int row = current->iocache_id;
-		
-		// int cpu = smp_processor_id();
-		// printk(KERN_INFO "Stopping Scheduler: id=%d, cpu=%d\n", row, cpu);
+		unsigned long flags;
+		int row = READ_ONCE(current->iocache_id);
 
-		wake_up_process_iocache(current);
-		// schedule();
-
-		WRITE_ONCE(current->is_iocache_managed, false);
-
-		iowrite8 (0, 							REG(iocache->iomem, IOCACHE_REG_ENABLED(row)));
-		iowrite32(0, 							REG(iocache->iomem, IOCACHE_REG_PROC_CPU(row)));
-		iowrite64(0, 							REG(iocache->iomem, IOCACHE_REG_PROC_PTR(row)));
-		mmiowb();
-		
-		sched_force_next_local(NULL);
+		if (!READ_ONCE(current->iocache_id_valid)) {
+			printk(KERN_WARNING "no row initialized\n");
+			return -EPERM;
+		}
 
 		hrtimer_cancel(&current->to_hrtimer);
+
+		hrtimer_init(&current->wakeup_hrtimer, CLOCK_MONOTONIC, HRTIMER_MODE_REL_PINNED_HARD);
+		current->wakeup_hrtimer.function = iocache_wakeup_timer;
+		current->wakeup_period = ktime_set(0, 2e8); // 200ms 
+
+		spin_lock_irqsave(&iocache->sched_lock, flags);
+		wake_up_process_iocache(current);
+		set_current_state(TASK_RUNNING);
+		
+		iowrite64(0, 							REG(iocache->iomem, IOCACHE_REG_PROC_PTR(row)));
+		iowrite32(0, 							REG(iocache->iomem, IOCACHE_REG_PROC_CPU(row)));
+
+		// hrtimer_start(&current->wakeup_hrtimer, current->wakeup_period, HRTIMER_MODE_REL_PINNED_HARD);
+
+		spin_unlock_irqrestore(&iocache->sched_lock, flags);
+
         return 0;
 	}
 

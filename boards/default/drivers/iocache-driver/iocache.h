@@ -35,7 +35,7 @@
 #define NUM_CPUS 	4
 
 #define IOCACHE_CACHE_ENTRY_COUNT		64
-#define IOCACHE_UDP_RING_SIZE 			16 * 1024 		// 8KB
+#define IOCACHE_UDP_RING_SIZE 			16 * 1024 		// 16KB
 
 /* ---- Sub-block bases (must match Scala) ---- */
 #define IOCACHE_INT_BASE     0x000UL
@@ -148,8 +148,8 @@ struct iocache_device {
 
     struct miscdevice misc_dev; // Add the miscdevice member here	
 
-	struct eventfd_ctx *ev_ctx;  /* signaled from IRQ */
-    spinlock_t          ev_lock; /* protects ev_ctx */
+    spinlock_t    row_alloc_lock;
+    spinlock_t    sched_lock;
 	
 	unsigned long magic;
 
@@ -171,14 +171,6 @@ struct iocache_device {
 
 	struct u64_stats_sync syncp;
     u64 isr_ktime, entry_ktime, claim_ktime, syscall_time;
-
-	wait_queue_head_t wq;
-    // atomic_t ready; 
-
-	struct completion ready_comp;
-
-	struct hrtimer to_hrtimer;
-    ktime_t to_period;    // e.g., KTIME_MS(1)
 };
 
 static int iocache_misc_open(struct inode *inode, struct file *filp);

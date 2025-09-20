@@ -52,7 +52,7 @@ static int _accnet_ioctl(int fd, int index, off_t *offset, size_t *size) {
 }
 
 /* Initialize udp on nic registers */
-static void _init_regs(struct accnet_info *accnet, int row) {
+static void reset_ring(struct accnet_info *accnet, int row) {
 
     // printf("Init regs for row %d\n", accnet->iocache->row);
 
@@ -65,48 +65,28 @@ static void _init_regs(struct accnet_info *accnet, int row) {
 
     reg_write32(accnet->iocache->regs, IOCACHE_REG_RX_RING_SIZE(row),   0);
     reg_write32(accnet->iocache->regs, IOCACHE_REG_TX_RING_SIZE(row),   0);
+
 	reg_write32(accnet->udp_tx_regs, ACCNET_UDP_TX_RING_HEAD(row), 0);
 	reg_write32(accnet->udp_tx_regs, ACCNET_UDP_TX_RING_TAIL(row), 0);
     reg_write32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_HEAD(row), 0);
 	reg_write32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_TAIL(row), 0);
+
     reg_write32(accnet->iocache->regs, IOCACHE_REG_RX_RING_SIZE(row),   accnet->iocache->udp_rx_size);
     reg_write32(accnet->iocache->regs, IOCACHE_REG_TX_RING_SIZE(row),   accnet->iocache->udp_tx_size);
-
-    if (reg_read32(accnet->udp_tx_regs, ACCNET_UDP_TX_RING_TAIL(row)) != 0) {
-        exit(0);
-    }
-    if (reg_read32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_TAIL(row)) != 0) {
-        exit(0);
-    }
 }
 
 static void _deinit_regs(struct accnet_info *accnet, int row) {
-    
+    /* connections share these info, we cannot unset them */
 }
 
 int accnet_setup_connection(struct accnet_info *accnet, struct connection_info *connection) {
     if (accnet) {
-        // reg_write32(accnet->udp_tx_regs, ACCNET_UDP_TX_HDR_IP_SRC,       connection->src_ip);
-        // reg_write32(accnet->udp_tx_regs, ACCNET_UDP_TX_HDR_IP_DST,       connection->dst_ip);
-        // reg_write16(accnet->udp_tx_regs, ACCNET_UDP_TX_HDR_UDP_SRC_PORT, connection->src_port);
-        // reg_write16(accnet->udp_tx_regs, ACCNET_UDP_TX_HDR_UDP_DST_PORT, connection->dst_port);
         if (connection->src_mac) {
             reg_write64(accnet->udp_tx_regs, ACCNET_UDP_TX_HDR_MAC_SRC, connection->src_mac);
         }
         if (connection->dst_mac) {
             reg_write64(accnet->udp_tx_regs, ACCNET_UDP_TX_HDR_MAC_DST, connection->dst_mac);
         }
-        return 0;
-    }
-    else {
-        return -1;
-    }
-}
-
-int accnet_start_ring(struct accnet_info *accnet) {
-    if (accnet) {
-        // reg_write32(accnet->udp_tx_regs, ACCNET_UDP_TX_RING_SIZE, accnet->udp_tx_size);
-        // reg_write32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_SIZE, accnet->udp_rx_size);
         return 0;
     }
     else {
@@ -145,16 +125,19 @@ size_t accnet_send(struct accnet_info *accnet, void *buffer, size_t len) {
     return len;
 }
 
-int accnet_open(char *file, struct accnet_info *accnet, struct iocache_info *iocache, bool do_init) {
-    uintptr_t p;
+int accnet_open(char *file, struct accnet_info *accnet, struct iocache_info *iocache) {
+    if (!iocache) {
+        perror("iocache not opened first");
+        return -1;
+    }
+
+    accnet->iocache = iocache;
 
     accnet->fd = open(file, O_RDWR | O_SYNC);
     if (accnet->fd < 0) {
         perror("open");
         return -1;
     }
-
-    accnet->iocache = iocache;
 
     if (_accnet_ioctl(accnet->fd, 0, &accnet->regs_offset, &accnet->regs_size) != 0 ||
     _accnet_ioctl(accnet->fd, 1, &accnet->udp_tx_offset, &accnet->udp_tx_regs_size) != 0 ||
@@ -189,20 +172,20 @@ int accnet_open(char *file, struct accnet_info *accnet, struct iocache_info *ioc
         return -1;
     }
 
-    if (do_init) {
-        _init_regs(accnet, iocache->row);
-    }
+    reset_ring(accnet, iocache->row);
 
     return 0;
 }
 
 /* Cleanup */
 int accnet_close(struct accnet_info *accnet) {
-    _deinit_regs(accnet, accnet->iocache->row);
-    munmap((void *)(uintptr_t) accnet->regs, accnet->regs_size);
-    munmap((void *)(uintptr_t) accnet->udp_tx_regs, accnet->udp_tx_regs_size);
-    munmap((void *)(uintptr_t) accnet->udp_rx_regs, accnet->udp_rx_regs_size);
-    close(accnet->fd);
+    if (accnet) {
+        _deinit_regs(accnet, accnet->iocache->row);
+        munmap((void *)(uintptr_t) accnet->regs, accnet->regs_size);
+        munmap((void *)(uintptr_t) accnet->udp_tx_regs, accnet->udp_tx_regs_size);
+        munmap((void *)(uintptr_t) accnet->udp_rx_regs, accnet->udp_rx_regs_size);
+        close(accnet->fd);
+    }
 
     return 0;
 }

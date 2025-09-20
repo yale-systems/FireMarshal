@@ -170,16 +170,15 @@ int main(int argc, char **argv) {
     struct accnet_info *accnet      = malloc(sizeof(struct accnet_info));
     struct iocache_info *iocache    = calloc(1, sizeof(*iocache));
     long long *rtts                 = malloc(sizeof(long long) * n_tests);
-    long long *network_latency      = malloc(sizeof(long long) * n_tests);
+
 
     if (iocache_open(iocache_filename, iocache) < 0) {
         fprintf(stderr, "iocache_open failed\n"); 
         return 1;
     }
 
-    // printf("row is %d\n", iocache->row);
-
-    if (accnet_open(accnet_filename, accnet, iocache, true) < 0) {
+    if (accnet_open(accnet_filename, accnet, iocache) < 0) {
+        iocache_close(iocache);
         fprintf(stderr, "accnet_open failed\n"); 
         return 1;
     }
@@ -192,17 +191,14 @@ int main(int argc, char **argv) {
     accnet_setup_connection(accnet, conn);
     iocache_setup_connection(iocache, conn);
 
-    if (is_blocking)
-        iocache_start_scheduler(iocache);
+    /* Run our scheduler */
+    iocache_start_scheduler(iocache);
 
     /* Initializing payload */
     uint8_t payload[payload_size];
     for (uint32_t i = 0; i < payload_size; i++) {
         payload[i] = i & 0xff;
     }
-
-    /* Init rings */
-    // accnet_start_ring(accnet);
 
     long long sum_ns = 0, min_ns = 0, max_ns = 0;
     uint64_t sum_network_latency_tick = 0;
@@ -261,15 +257,13 @@ int main(int argc, char **argv) {
         }
     }
 
-    if (is_blocking)
-        iocache_stop_scheduler(iocache);
-
-    iocache_clear_connection(iocache);
+    /* Stop our scheduler */
+    iocache_stop_scheduler(iocache);
 
     /* Close Accnet */
     accnet_close(accnet);
-
     iocache_close(iocache);
+    
     return 0;
 }
 
@@ -348,10 +342,6 @@ uint8_t payload[], uint32_t payload_size, bool debug)
     struct timespec before, after;
     int row = iocache->row;
     int counter = 0;
-
-    // Enable ring
-    reg_write8 (iocache->regs, IOCACHE_REG_ENABLED(row), 1);
-    mmio_wmb();
 
     uint32_t rx_head, rx_tail, rx_size;
     uint32_t tx_head, tx_tail, tx_size;

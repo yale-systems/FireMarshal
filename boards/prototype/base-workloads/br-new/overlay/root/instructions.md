@@ -2,7 +2,7 @@ Use these commands:
 
 Make files executable:
 ```shell
-chmod +x udp_* interrupt_exp
+chmod +x udp_* interrupt_exp run_concurrent.sh
 ```
 
 (Optional) Pin AccNIC's interrupts to CPU 0. You may use `echo '0-3' >` to assign them to all cores.

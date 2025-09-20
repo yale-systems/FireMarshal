@@ -76,15 +76,9 @@ static irqreturn_t iocache_isr_rx(int irq, void *data) {
 	
 	struct iocache_device *iocache = data;
 	int cpu = smp_processor_id();
-	
-	// printk(KERN_INFO "RX interrupt received at cpu %d\n", cpu);
 
 	iowrite32(cpu, REG(iocache->iomem, IOCACHE_REG_RX_KICK_ALL_CPU));
-	mmiowb();
-
-	// printk(KERN_INFO "Kick Count: %d\n", ioread8(REG(iocache->iomem, IOCACHE_REG_RX_KICK_ALL_COUNT)));
-	// printk(KERN_INFO "Kick Mask : 0x%llX\n", ioread64(REG(iocache->iomem, IOCACHE_REG_RX_KICK_ALL_MASK)));
-	// clear_intmask_rx(iocache, cpu);
+	wmb();
 
 	set_tsk_need_resched(current);
 
@@ -252,6 +246,9 @@ static int iocache_probe(struct platform_device *pdev) {
 	iocache->dev = dev;
 	iocache->magic = MAGIC_CHAR;
 
+	spin_lock_init(&iocache->row_alloc_lock);
+	spin_lock_init(&iocache->sched_lock);
+
 	if ((ret = iocache_parse_addr(iocache)) < 0)
 		return ret;
 
@@ -261,9 +258,6 @@ static int iocache_probe(struct platform_device *pdev) {
 	if ((ret = plic_set_prio(iocache)) != 0)
 		return ret;
 
-	spin_lock_init(&iocache->ev_lock);
-	u64_stats_init(&iocache->syncp);
-
 	register_iocache_forall(iocache->iomem);
 
 	ret = init_udp_rings(iocache);
@@ -271,6 +265,14 @@ static int iocache_probe(struct platform_device *pdev) {
 		return ret;
 	}
 	populate_ring_info(iocache);
+
+	dev_info(dev, "Number of CPUs: %d", num_online_cpus());
+
+	/* Enable Interrupts */
+	for (uint32_t i = 0; i < NUM_CPUS; i++) {
+		set_intmask_rx(iocache, i);
+		set_intmask_txcomp(iocache, i);
+	}
 
 	// plic_unregister_fast_path(iocache);
 	if ((ret = plic_register_fast_path(iocache, iocache_isr_rx, iocache_isr_txcomp)) != 0)
@@ -296,6 +298,8 @@ static int iocache_remove(struct platform_device *pdev) {
 		dev_warn(dev, "Could not find misc device to deregister");
         return 0;
 	}
+
+	unregister_iocache_forall();
 	
 	plic_unregister_fast_path(iocache);
 
