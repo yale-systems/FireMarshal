@@ -236,14 +236,13 @@ static long iocache_misc_ioctl(struct file *file, unsigned int cmd, unsigned lon
 		 */
 		schedule();
 		__set_current_state(TASK_RUNNING);
+		hrtimer_cancel(&current->to_hrtimer);
 
 		// printk(KERN_INFO "stopping wait: id=%d\n", row);
 
 		iowrite8 (0, 	REG(iocache->iomem, IOCACHE_REG_RX_SUSPENDED(row)));
 		// iowrite8 (0, 	REG(iocache->iomem, IOCACHE_REG_TXCOMP_SUSPENDED(row)));
 		mmiowb();
-
-		hrtimer_cancel(&current->to_hrtimer);
 
 		// iocache->syscall_time = ktime_get_mono_fast_ns();
 
@@ -289,20 +288,9 @@ static long iocache_misc_ioctl(struct file *file, unsigned int cmd, unsigned lon
 		WRITE_ONCE(current->iocache_iomem, iocache->iomem);
 
 		// printk(KERN_INFO "Starting Scheduler: id=%d, cpu=%d\n", row, cpu);
-		
-		iowrite32(cpu, 							REG(iocache->iomem, IOCACHE_REG_PROC_CPU(row)));
-		iowrite64((u64) (uintptr_t) current, 	REG(iocache->iomem, IOCACHE_REG_PROC_PTR(row)));
-		mmiowb();
-
-		// printk(KERN_INFO "Wrote CPU info: %llu\n Actual PTR info: %llu", 
-				// ioread64(REG(iocache->iomem, IOCACHE_REG_PROC_PTR(row))),
-				// (u64) (uintptr_t) current);
-		
 
 		/* diactivate thread; order matters */
 		sched_force_next_local(current);
-
-		smp_wmb();                      // publish tsk before arming
 
 		hrtimer_init(&current->to_hrtimer, CLOCK_MONOTONIC, HRTIMER_MODE_REL_PINNED);
 		current->to_hrtimer.function = iocache_timeout_cb;
@@ -315,19 +303,13 @@ static long iocache_misc_ioctl(struct file *file, unsigned int cmd, unsigned lon
 		// int cpu = smp_processor_id();
 		// printk(KERN_INFO "Stopping Scheduler: id=%d, cpu=%d\n", row, cpu);
 
-		wake_up_process_iocache(current);
 		// schedule();
-
-		WRITE_ONCE(current->is_iocache_managed, false);
 		
-		iowrite32(0, 							REG(iocache->iomem, IOCACHE_REG_PROC_CPU(row)));
-		iowrite64(0, 							REG(iocache->iomem, IOCACHE_REG_PROC_PTR(row)));
-		mmiowb();
+		wake_up_process_iocache(current);
 		
-		sched_force_next_local(NULL);
-
-		set_tsk_need_resched(current);  
-		set_current_state(TASK_RUNNING);
+		// sched_force_next_local(NULL);
+		// set_tsk_need_resched(current);  
+		// set_current_state(TASK_RUNNING);
 		// schedule();
 
 		hrtimer_cancel(&current->to_hrtimer);
