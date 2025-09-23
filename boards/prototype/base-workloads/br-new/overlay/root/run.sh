@@ -2,7 +2,7 @@
 # run_udp_exp.sh — launch many udp_exp instances with varying src ports & rings
 
 # Defaults (edit here if you like)
-CMD="./udp_exp"
+CMD="chrt -f 10 ./udp_exp"
 RESET_ALL="./udp_exp --reset"
 SRC_MAC="00:0a:35:06:4d:e2"
 SRC_IP="10.0.0.1"

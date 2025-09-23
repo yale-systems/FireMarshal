@@ -73,16 +73,33 @@ extern u64 riscv_get_irq_entry_ktime(void);   // from do_irq patch
 extern u64 riscv_get_plic_claim_ktime(void);  // new, from plic_handle_irq
 
 static irqreturn_t iocache_isr_rx(int irq, void *data) {
-	
+	struct task_struct *fn;
+	u64 raw_pointer;
 	struct iocache_device *iocache = data;
 	int cpu = smp_processor_id();
 	
 	// printk(KERN_INFO "RX interrupt received at cpu %d\n", cpu);
 
 	iowrite32(cpu, REG(iocache->iomem, IOCACHE_REG_RX_KICK_ALL_CPU));
-	// mmiowb();
+	mmiowb();
+	
+	uint32_t count = ioread32(REG(iocache->iomem, IOCACHE_REG_RX_KICK_ALL_COUNT));
+	uint64_t mask  = ioread64(REG(iocache->iomem, IOCACHE_REG_RX_KICK_ALL_MASK));
 
-	uint64_t mask = ioread64(REG(iocache->iomem, IOCACHE_REG_RX_KICK_ALL_MASK));
+	for (int i = 0; i < IOCACHE_CACHE_ENTRY_COUNT && count > 0; ++i) {
+		if (unlikely(mask & (1UL << i))) {
+			raw_pointer = ioread64(REG(iocache->iomem, IOCACHE_REG_PROC_PTR(i)));
+
+			if (unlikely(!raw_pointer)) {
+				printk(KERN_ERR "Bad ISR behaviour for cpu=%d\n", cpu);
+				continue;
+			}
+
+			fn = (struct task_struct *) raw_pointer;
+			wake_up_process_iocache(fn);
+			--count;
+		}
+	}
 
 	// printk(KERN_INFO "Kick Count: %d\n", ioread8(REG(iocache->iomem, IOCACHE_REG_RX_KICK_ALL_COUNT)));
 	// printk(KERN_INFO "Kick Mask : 0x%llX\n", ioread64(REG(iocache->iomem, IOCACHE_REG_RX_KICK_ALL_MASK)));

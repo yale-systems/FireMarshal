@@ -65,9 +65,9 @@ static void pin_to_cpu(int cpu) {
         perror("sched_setaffinity"); /* continue anyway */
     }
 
-    // struct sched_param sp = { .sched_priority = 10 }; // SCHED_FIFO 1..99
-    // sched_setscheduler(0, SCHED_FIFO, &sp);
-    // mlockall(MCL_CURRENT|MCL_FUTURE);
+    struct sched_param sp = { .sched_priority = 10 }; // SCHED_FIFO 1..99
+    sched_setscheduler(0, SCHED_FIFO, &sp);
+    mlockall(MCL_CURRENT|MCL_FUTURE);
 }
 
 int main(int argc, char **argv) {
@@ -219,8 +219,8 @@ int main(int argc, char **argv) {
     accnet_setup_connection(accnet, conn);
     iocache_setup_connection(iocache, conn);
 
-    if (is_blocking)
-        iocache_start_scheduler(iocache);
+    // if (is_blocking)
+    //     iocache_start_scheduler(iocache);
 
     /* Initializing payload */
     uint8_t payload[payload_size];
@@ -278,11 +278,6 @@ int main(int argc, char **argv) {
     double avg_us           = (sum_ns                   / (double)received_ok) / 1e3;
     double avg_network_us   = (sum_network_latency_tick / (double)received_ok) * US_PER_TICK;
 
-    if (is_blocking)
-        iocache_stop_scheduler(iocache);
-
-    
-
     printf("\nResults (%s): recv=%d/%d  min=%.2f us , avg=%.2f us , max=%.2f us , network=%.2f us\n\n",
                 mode, received_total, n_tests, min_ns/1e3, avg_us, max_ns/1e3, avg_network_us);
     // printf("Time breakdown average:\nEntry-Before: %.3f us\nPLIC-Entry: %.3f us\nIRQ-PLIC: %.3f us\n"
@@ -299,6 +294,9 @@ int main(int argc, char **argv) {
             printf("iter=%d rtt=%.3f us\n", i, rtts[i] / 1e3);
         }
     }
+
+    // if (is_blocking)
+    //     iocache_stop_scheduler(iocache);
 
     iocache_clear_connection(iocache);
 
