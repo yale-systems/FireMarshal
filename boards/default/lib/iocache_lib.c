@@ -102,7 +102,7 @@ int iocache_wait_on_rx(struct iocache_info *iocache) {
 
     // printf("Going into waiting syscall...\n");
 
-    // iocache_set_rx_suspended(iocache);
+    iocache_set_rx_suspended(iocache);
     _iocache_enable_interrupts_rx(iocache);
 
     if (ioctl(iocache->fd, IOCACHE_IOCTL_WAIT_READY) == -1) {
@@ -114,7 +114,7 @@ int iocache_wait_on_rx(struct iocache_info *iocache) {
     // printf("Back from waiting syscall...\n");
 
 
-    // iocache_clear_rx_suspended(iocache);
+    iocache_clear_rx_suspended(iocache);
 
     /* We have to return -1 if it was a timeout */
     return (iocache_is_rx_available(iocache)) ? 0 : -1;
@@ -171,15 +171,32 @@ int iocache_stop_scheduler(struct iocache_info *iocache) {
     return 0;
 }
 
+int _iocache_reserve_ring(struct iocache_info *iocache, int row) {
 
-int iocache_open(char *file, struct iocache_info *iocache) {
+    if (ioctl(iocache->fd, IOCACHE_IOCTL_RESERVE_RING, &row) == -1) {
+        perror("IOCACHE_IOCTL_RESERVE_RING ioctl failed");
+        return -1;
+    }
+    // printf("** Reserved row=%d\n", row);
+    iocache->row = row;
+
+    return 0;
+}
+
+int _iocache_free_ring(struct iocache_info *iocache) {
+    if (ioctl(iocache->fd, IOCACHE_IOCTL_FREE_RING) == -1) {
+        perror("IOCACHE_IOCTL_FREE_RING ioctl failed");
+        return -1;
+    }
+    return 0;
+}
+
+int iocache_open(char *file, struct iocache_info *iocache, int row) {
     uintptr_t p;
     iocache->udp_tx_size = 8 * 1024;
     iocache->udp_rx_size = 8 * 1024;
 
     const size_t ALIGN = 64;
-
-    iocache->row = 20;
 
     iocache->fd = open(file, O_RDWR | O_SYNC);
     if (iocache->fd < 0) {
@@ -212,6 +229,10 @@ int iocache_open(char *file, struct iocache_info *iocache) {
         close(iocache->fd);
         return -1;
     }
+
+    // iocache->row = 20;
+    _iocache_reserve_ring(iocache, row);
+
 
     iocache->ep = epoll_create1(0);
     struct epoll_event ev = {.events = EPOLLIN, .data.fd = iocache->efd};
@@ -257,18 +278,23 @@ int iocache_close(struct iocache_info *iocache) {
         int neg1 = -1;
         ioctl(iocache->fd, IOCACHE_IOCTL_SET_EVENTFD, &neg1); // disarm in driver
 
-        _iocache_disable_interrupts_rx(iocache);
+        // _iocache_disable_interrupts_rx(iocache);
+
+        // iocache_stop_scheduler(iocache);
+
         iocache_clear_rx_suspended(iocache);
         iocache_clear_connection(iocache);
     
         munmap((void *)(uintptr_t) iocache->regs, iocache->regs_size);
-    
-        close(iocache->ep);
-        close(iocache->efd);
-        close(iocache->fd);
 
         munmap((void *)(uintptr_t) iocache->udp_rx_buffer, iocache->udp_rx_size);
         munmap((void *)(uintptr_t) iocache->udp_tx_buffer, iocache->udp_tx_size);
+
+        _iocache_free_ring(iocache);
+
+        close(iocache->ep);
+        close(iocache->efd);
+        close(iocache->fd);
     }
     return 0;
 }

@@ -16,8 +16,13 @@ static enum hrtimer_restart iocache_timeout_cb(struct hrtimer *t)
 {
     struct task_struct *tsk = container_of(t, struct task_struct, to_hrtimer);
 
-    if (!tsk || (tsk && task_is_running(tsk))) {
+    if (!tsk || !tsk->is_iocache_managed) {
         return HRTIMER_NORESTART;
+	}
+
+	int suspended = ioread8(REG(tsk->iocache_iomem, IOCACHE_REG_RX_SUSPENDED(tsk->iocache_id)));
+	if (!suspended) {
+		return HRTIMER_NORESTART;
 	}
 	
 	// int cpu = smp_processor_id();
@@ -25,9 +30,10 @@ static enum hrtimer_restart iocache_timeout_cb(struct hrtimer *t)
 
     /* Wake it */
 	iowrite8 (0, 	REG(tsk->iocache_iomem, IOCACHE_REG_RX_SUSPENDED(tsk->iocache_id)));
+	// iowrite8 (0, 	REG(tsk->iocache_iomem, IOCACHE_REG_TXCOMP_SUSPENDED(tsk->iocache_id)));
 	mmiowb();
 
-	WRITE_ONCE(tsk->__state, TASK_RUNNING);
+	// WRITE_ONCE(tsk->__state, TASK_RUNNING);
 	set_tsk_need_resched(current);  
 
 
@@ -217,7 +223,7 @@ static long iocache_misc_ioctl(struct file *file, unsigned int cmd, unsigned lon
 		set_current_state(TASK_INTERRUPTIBLE);
 
 		iowrite8 (1, 	REG(iocache->iomem, IOCACHE_REG_RX_SUSPENDED(row)));
-		iowrite8 (1, 	REG(iocache->iomem, IOCACHE_REG_ENABLED(row)));
+		// iowrite8 (1, 	REG(iocache->iomem, IOCACHE_REG_TXCOMP_SUSPENDED(row)));
 		mmiowb();
 
 		// printk(KERN_INFO "starting wait: id=%d\n", row);
@@ -234,6 +240,7 @@ static long iocache_misc_ioctl(struct file *file, unsigned int cmd, unsigned lon
 		// printk(KERN_INFO "stopping wait: id=%d\n", row);
 
 		iowrite8 (0, 	REG(iocache->iomem, IOCACHE_REG_RX_SUSPENDED(row)));
+		// iowrite8 (0, 	REG(iocache->iomem, IOCACHE_REG_TXCOMP_SUSPENDED(row)));
 		mmiowb();
 
 		hrtimer_cancel(&current->to_hrtimer);
@@ -247,21 +254,44 @@ static long iocache_misc_ioctl(struct file *file, unsigned int cmd, unsigned lon
         if (copy_to_user((void __user *)arg, &row, sizeof(row)))
             return -EFAULT;
         return 0;
+	} else if (cmd == IOCACHE_IOCTL_RESERVE_RING) {
+		int row;
+
+		if (copy_from_user(&row, (void __user *)arg, sizeof(row)))
+            return -EFAULT;
+
+		iowrite8 (1, 	REG(iocache->iomem, IOCACHE_REG_ENABLED(row)));
+		mmiowb();
+		WRITE_ONCE(current->iocache_id, row);
+
+        if (copy_to_user((void __user *)arg, &row, sizeof(row)))
+            return -EFAULT;
+        return 0;
+	} else if (cmd == IOCACHE_IOCTL_FREE_RING) {
+		int row = current->iocache_id;
+
+		spin_lock(&iocache->ring_alloc_lock);
+
+		iowrite8 (0, 	REG(iocache->iomem, IOCACHE_REG_ENABLED(row)));
+
+		spin_unlock(&iocache->ring_alloc_lock);
+
+        return 0;
 	} else if (cmd == IOCACHE_IOCTL_RUN_SCHEDULER) {
 		int row;
-		int cpu = smp_processor_id();
+		int cpu;
 
-		// row = ioread32(REG(iocache->iomem, IOCACHE_REG_ALLOC_FIRST_EMPTY));
-		row = 20;
+		migrate_disable();
+		cpu = smp_processor_id();
 
-		WRITE_ONCE(current->iocache_id, row);
+		row = current->iocache_id;
+
 		WRITE_ONCE(current->iocache_iomem, iocache->iomem);
 
 		// printk(KERN_INFO "Starting Scheduler: id=%d, cpu=%d\n", row, cpu);
 		
 		iowrite32(cpu, 							REG(iocache->iomem, IOCACHE_REG_PROC_CPU(row)));
 		iowrite64((u64) (uintptr_t) current, 	REG(iocache->iomem, IOCACHE_REG_PROC_PTR(row)));
-		iowrite8 (1, 							REG(iocache->iomem, IOCACHE_REG_ENABLED(row)));
 		mmiowb();
 
 		// printk(KERN_INFO "Wrote CPU info: %llu\n Actual PTR info: %llu", 
@@ -276,7 +306,7 @@ static long iocache_misc_ioctl(struct file *file, unsigned int cmd, unsigned lon
 
 		hrtimer_init(&current->to_hrtimer, CLOCK_MONOTONIC, HRTIMER_MODE_REL_PINNED);
 		current->to_hrtimer.function = iocache_timeout_cb;
-		current->to_period = ktime_set(0, 1e8); // 100ms 
+		current->to_period = ktime_set(1, 0); // 1s 
 
         return 0;
 	} else if (cmd == IOCACHE_IOCTL_STOP_SCHEDULER) {
@@ -289,13 +319,16 @@ static long iocache_misc_ioctl(struct file *file, unsigned int cmd, unsigned lon
 		// schedule();
 
 		WRITE_ONCE(current->is_iocache_managed, false);
-
-		iowrite8 (0, 							REG(iocache->iomem, IOCACHE_REG_ENABLED(row)));
+		
 		iowrite32(0, 							REG(iocache->iomem, IOCACHE_REG_PROC_CPU(row)));
 		iowrite64(0, 							REG(iocache->iomem, IOCACHE_REG_PROC_PTR(row)));
 		mmiowb();
 		
 		sched_force_next_local(NULL);
+
+		set_tsk_need_resched(current);  
+		set_current_state(TASK_RUNNING);
+		// schedule();
 
 		hrtimer_cancel(&current->to_hrtimer);
         return 0;

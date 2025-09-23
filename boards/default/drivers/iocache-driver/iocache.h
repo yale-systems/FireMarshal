@@ -150,6 +150,8 @@ struct iocache_device {
 
 	struct eventfd_ctx *ev_ctx;  /* signaled from IRQ */
     spinlock_t          ev_lock; /* protects ev_ctx */
+
+    spinlock_t          ring_alloc_lock; /* protects ev_ctx */
 	
 	unsigned long magic;
 

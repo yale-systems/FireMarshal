@@ -148,6 +148,11 @@ size_t accnet_send(struct accnet_info *accnet, void *buffer, size_t len) {
 int accnet_open(char *file, struct accnet_info *accnet, struct iocache_info *iocache, bool do_init) {
     uintptr_t p;
 
+    if (!iocache) {
+        perror("iocache not opened");
+        return -1;
+    }
+
     accnet->fd = open(file, O_RDWR | O_SYNC);
     if (accnet->fd < 0) {
         perror("open");

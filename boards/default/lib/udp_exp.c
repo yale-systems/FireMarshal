@@ -76,6 +76,8 @@ int main(int argc, char **argv) {
     char *iocache_filename = "/dev/iocache-misc";
     int n_tests = 64;
     bool debug = false;
+    bool skip_first = false;
+    bool reset = false;
     bool print_all = false;
     uint32_t payload_size = 1*1024;
     char *src_ip = "10.0.0.2";
@@ -85,20 +87,26 @@ int main(int argc, char **argv) {
     char *dst_mac = "00:0a:35:06:4d:e2";
     uint16_t dst_port = 1234;
     char *mode = MODE_POLLING;
+    int ring = 0;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--help") == 0) {
             printf("Usage: %s [--cpu A]"
                 "[--ntest N] [--mode {" MODE_POLLING "|" MODE_BLOCKING "}]"
-                "[--payload-size BYTES] "
+                "[--payload-size BYTES] [--ring R]"
                 "[--src-ip ADDR] [--src-port PORT] "
                 "[--dst-ip ADDR] [--dst-port PORT] "
-                "[--debug] [--print-all]\n", argv[0]);
+                "[--reset] "
+                "[--debug] [--print-all] [--skip-first]\n", argv[0]);
             return 0;
         }
         else if (strcmp(argv[i], "--cpu") == 0 && i + 1 < argc) {
             cpu = atoi(argv[++i]);
             // printf("Parsed --cpu = %d\n", cpu);
+        }
+        else if (strcmp(argv[i], "--ring") == 0 && i + 1 < argc) {
+            ring = atoi(argv[++i]);
+            // printf("Parsed --ring = %d\n", ring);
         }
         else if (strcmp(argv[i], "--ntest") == 0 && i + 1 < argc) {
             n_tests = atoi(argv[++i]);
@@ -151,6 +159,14 @@ int main(int argc, char **argv) {
             debug = true;
             // printf("Parsed --debug\n");
         }
+        else if (strcmp(argv[i], "--skip-first") == 0) {
+            skip_first = true;
+            // printf("Parsed --skip-first\n");
+        }
+        else if (strcmp(argv[i], "--reset") == 0) {
+            reset = true;
+            // printf("Parsed --reset\n");
+        }
         else if (strcmp(argv[i], "--print-all") == 0) {
             print_all = true;
             // printf("Parsed --print-all\n");
@@ -172,7 +188,7 @@ int main(int argc, char **argv) {
     long long *rtts                 = malloc(sizeof(long long) * n_tests);
     long long *network_latency      = malloc(sizeof(long long) * n_tests);
 
-    if (iocache_open(iocache_filename, iocache) < 0) {
+    if (iocache_open(iocache_filename, iocache, ring) < 0) {
         fprintf(stderr, "iocache_open failed\n"); 
         return 1;
     }
@@ -182,6 +198,17 @@ int main(int argc, char **argv) {
     if (accnet_open(accnet_filename, accnet, iocache, true) < 0) {
         fprintf(stderr, "accnet_open failed\n"); 
         return 1;
+    }
+
+    if (reset) {
+        for (int i = 0; i < IOCACHE_CACHE_ENTRY_COUNT; i++) {
+            reg_write32(iocache->regs, IOCACHE_REG_PROC_PTR(i), 0);
+            reg_write32(iocache->regs, IOCACHE_REG_ENABLED(i), 0);
+            reg_write32(iocache->regs, IOCACHE_REG_RX_SUSPENDED(i), 0);
+        }
+        accnet_close(accnet);
+        iocache_close(iocache);
+        return 0;
     }
 
     struct connection_info *conn = malloc(sizeof(struct connection_info));
@@ -209,6 +236,7 @@ int main(int argc, char **argv) {
 
     /* Run Test */
     int received_ok = 0;
+    int received_total = 0;
     for (int i = 0; i < n_tests; i++) {
         struct timespec diff = {0, 0};
 
@@ -222,10 +250,16 @@ int main(int argc, char **argv) {
             continue;
         }
 
+        ++received_total;
+
+        /* skip first packet entirely */
+        if (i == 0 && skip_first)
+            continue;
+
         long long rtt_ns        = diff.tv_sec * 1e9 + diff.tv_nsec;
         uint64_t netdelay_tick   = accnet_get_outside_ticks(accnet);
 
-        if (i == 0) {
+        if (i == 0 || min_ns == 0) {
             min_ns = max_ns = rtt_ns;
         } else {
             if (rtt_ns < min_ns) min_ns = rtt_ns;
@@ -244,8 +278,13 @@ int main(int argc, char **argv) {
     double avg_us           = (sum_ns                   / (double)received_ok) / 1e3;
     double avg_network_us   = (sum_network_latency_tick / (double)received_ok) * US_PER_TICK;
 
-    printf("\nResults (%s): recv=%d/%d  min=%.2f us , avg=%.2f us , max=%.2f us , network=%.2f us\n",
-                mode, received_ok, n_tests, min_ns/1e3, avg_us, max_ns/1e3, avg_network_us);
+    if (is_blocking)
+        iocache_stop_scheduler(iocache);
+
+    
+
+    printf("\nResults (%s): recv=%d/%d  min=%.2f us , avg=%.2f us , max=%.2f us , network=%.2f us\n\n",
+                mode, received_total, n_tests, min_ns/1e3, avg_us, max_ns/1e3, avg_network_us);
     // printf("Time breakdown average:\nEntry-Before: %.3f us\nPLIC-Entry: %.3f us\nIRQ-PLIC: %.3f us\n"
     //     "Syscall-IRQ: %.3f us\nAfter-Syscall: %.3f us\n",
     //         time_ns[0]/(double)received_ok/1e3, 
@@ -261,15 +300,13 @@ int main(int argc, char **argv) {
         }
     }
 
-    if (is_blocking)
-        iocache_stop_scheduler(iocache);
-
     iocache_clear_connection(iocache);
 
     /* Close Accnet */
     accnet_close(accnet);
 
     iocache_close(iocache);
+    exit(0);
     return 0;
 }
 
@@ -347,11 +384,9 @@ uint8_t payload[], uint32_t payload_size, bool debug)
 {
     struct timespec before, after;
     int row = iocache->row;
-    int counter = 0;
 
-    // Enable ring
-    reg_write8 (iocache->regs, IOCACHE_REG_ENABLED(row), 1);
-    mmio_wmb();
+    // printf("poll, row is %d\n", row);
+    int counter = 0;
 
     uint32_t rx_head, rx_tail, rx_size;
     uint32_t tx_head, tx_tail, tx_size;

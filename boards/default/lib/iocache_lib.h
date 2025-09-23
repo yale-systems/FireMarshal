@@ -89,8 +89,8 @@
 #define IOCACHE_REG_TXCOMP_SUSPENDED(row) IOCACHE_REG((row), IOCACHE_TXCOMP_SUSPENDED_OFF)
 #define IOCACHE_REG_FLAGS_RO(row)         IOCACHE_REG((row), IOCACHE_FLAGS_RO_OFF)
 #define IOCACHE_REG_CONN_ID(row)          IOCACHE_REG((row), IOCACHE_CONN_ID_OFF)
-// #define IOCACHE_REG_PROC_PTR(row)         IOCACHE_REG((row), IOCACHE_PROC_PTR_OFF)
-// #define IOCACHE_REG_PROC_CPU(row)         IOCACHE_REG((row), IOCACHE_PROC_CPU_OFF)
+#define IOCACHE_REG_PROC_PTR(row)         IOCACHE_REG((row), IOCACHE_PROC_PTR_OFF)
+#define IOCACHE_REG_PROC_CPU(row)         IOCACHE_REG((row), IOCACHE_PROC_CPU_OFF)
 #define IOCACHE_REG_RX_RING_ADDR(row)     IOCACHE_REG((row), IOCACHE_RX_RING_ADDR_OFF)
 #define IOCACHE_REG_RX_RING_SIZE(row)     IOCACHE_REG((row), IOCACHE_RX_RING_SIZE_OFF)
 #define IOCACHE_REG_TX_RING_ADDR(row)     IOCACHE_REG((row), IOCACHE_TX_RING_ADDR_OFF)
@@ -119,7 +119,7 @@ struct iocache_info {
     int ep;
 };
 
-int iocache_open(char *file, struct iocache_info *iocache);
+int iocache_open(char *file, struct iocache_info *iocache, int row);
 int iocache_close(struct iocache_info *iocache);
 int iocache_wait_on_rx(struct iocache_info *iocache);
 int iocache_wait_on_txcomp(struct iocache_info *iocache);

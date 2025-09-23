@@ -80,7 +80,9 @@ static irqreturn_t iocache_isr_rx(int irq, void *data) {
 	// printk(KERN_INFO "RX interrupt received at cpu %d\n", cpu);
 
 	iowrite32(cpu, REG(iocache->iomem, IOCACHE_REG_RX_KICK_ALL_CPU));
-	mmiowb();
+	// mmiowb();
+
+	uint64_t mask = ioread64(REG(iocache->iomem, IOCACHE_REG_RX_KICK_ALL_MASK));
 
 	// printk(KERN_INFO "Kick Count: %d\n", ioread8(REG(iocache->iomem, IOCACHE_REG_RX_KICK_ALL_COUNT)));
 	// printk(KERN_INFO "Kick Mask : 0x%llX\n", ioread64(REG(iocache->iomem, IOCACHE_REG_RX_KICK_ALL_MASK)));
@@ -92,7 +94,7 @@ static irqreturn_t iocache_isr_rx(int irq, void *data) {
 }
 
 static irqreturn_t iocache_isr_txcomp(int irq, void *data) {
-	// printk(KERN_DEBUG "TX interrupt received\n");
+	printk(KERN_DEBUG "TX interrupt received\n");
 	// Nothing for now
 	return IRQ_HANDLED;
 }
@@ -263,8 +265,15 @@ static int iocache_probe(struct platform_device *pdev) {
 
 	spin_lock_init(&iocache->ev_lock);
 	u64_stats_init(&iocache->syncp);
+	
+	spin_lock_init(&iocache->ring_alloc_lock);
 
 	register_iocache_forall(iocache->iomem);
+
+	for (int i = 0; i < NUM_CPUS; i++) {
+		set_intmask_rx(iocache, i);
+		set_intmask_txcomp(iocache, i);
+	}
 
 	ret = init_udp_rings(iocache);
 	if (ret != 0) {
