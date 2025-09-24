@@ -73,6 +73,7 @@ extern u64 riscv_get_irq_entry_ktime(void);   // from do_irq patch
 extern u64 riscv_get_plic_claim_ktime(void);  // new, from plic_handle_irq
 
 static irqreturn_t iocache_isr_rx(int irq, void *data) {
+	unsigned long flags;
 	struct task_struct *fn;
 	u64 raw_pointer;
 	struct iocache_device *iocache = data;
@@ -80,11 +81,14 @@ static irqreturn_t iocache_isr_rx(int irq, void *data) {
 	
 	// printk(KERN_INFO "RX interrupt received at cpu %d\n", cpu);
 
+	spin_lock_irqsave(&iocache->rxkick_lock, flags);
+
 	iowrite32(cpu, REG(iocache->iomem, IOCACHE_REG_RX_KICK_ALL_CPU));
-	mmiowb();
-	
+
 	uint32_t count = ioread32(REG(iocache->iomem, IOCACHE_REG_RX_KICK_ALL_COUNT));
 	uint64_t mask  = ioread64(REG(iocache->iomem, IOCACHE_REG_RX_KICK_ALL_MASK));
+
+	spin_unlock_irqrestore(&iocache->rxkick_lock, flags);
 
 	for (int i = 0; i < IOCACHE_CACHE_ENTRY_COUNT && count > 0; ++i) {
 		if (unlikely(mask & (1UL << i))) {
@@ -284,6 +288,7 @@ static int iocache_probe(struct platform_device *pdev) {
 	u64_stats_init(&iocache->syncp);
 	
 	spin_lock_init(&iocache->ring_alloc_lock);
+	spin_lock_init(&iocache->rxkick_lock);
 
 	register_iocache_forall(iocache->iomem);
 

@@ -119,7 +119,7 @@ uint64_t accnet_get_outside_ticks(struct accnet_info *accnet) {
     uint64_t tx_timestamp = reg_read64(accnet->udp_tx_regs, ACCNET_UDP_TX_LAST_TIMESTAMP);
 
     if (rx_timestamp <= tx_timestamp) {
-        printf("Warning: bad timestamps -- tx=%lu , rx=%lu\n", tx_timestamp, rx_timestamp);
+        // printf("Warning: bad timestamps -- tx=%lu , rx=%lu\n", tx_timestamp, rx_timestamp);
         return 0;
     }
     return (uint64_t)(rx_timestamp - tx_timestamp);

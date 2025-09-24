@@ -23,11 +23,13 @@ static enum hrtimer_restart iocache_timeout_cb(struct hrtimer *t)
 	int suspended = ioread8(REG(tsk->iocache_iomem, IOCACHE_REG_RX_SUSPENDED(tsk->iocache_id)));
 	if (!suspended) {
 		printk(KERN_WARNING "Already awake\n");
+		wake_up_process(tsk);
+		set_tsk_need_resched(current);  
 		return HRTIMER_NORESTART;
 	}
 	
-	int cpu = smp_processor_id();
-	printk(KERN_INFO "Timer hit, cacheID=%d, cpu=%d\n", tsk->iocache_id, cpu);
+	// int cpu = smp_processor_id();
+	// printk(KERN_INFO "Timer hit, cacheID=%d, cpu=%d\n", tsk->iocache_id, cpu);
 
     /* Wake it */
 	iowrite8 (0, 	REG(tsk->iocache_iomem, IOCACHE_REG_RX_SUSPENDED(tsk->iocache_id)));
