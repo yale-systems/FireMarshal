@@ -22,10 +22,10 @@ LDFLAGS  += --sysroot=$(SYSROOT)
 endif
 
 # ---- apps and sources ----
-APPS := udp_exp udp_client_kernel file_receiver
+APPS := udp_exp udp_client_kernel file_receiver udp_server_kernel
 
 COMMON_SRCS := accnet_lib.c iocache_lib.c 
-SRCS := $(COMMON_SRCS) udp_exp.c udp_client_kernel.c file_receiver.c
+SRCS := $(COMMON_SRCS) udp_exp.c udp_client_kernel.c file_receiver.c udp_server_kernel.c
 
 COMMON_OBJS := $(COMMON_SRCS:.c=.o)
 DEPS := $(SRCS:.c=.d)

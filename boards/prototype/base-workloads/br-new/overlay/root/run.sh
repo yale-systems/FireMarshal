@@ -6,7 +6,7 @@ CMD="chrt -f 10 ./udp_exp"
 RESET_ALL="./udp_exp --reset"
 SRC_MAC="00:0a:35:06:4d:e2"
 SRC_IP="10.0.0.1"
-DST_MAC="0c:42:a1:a8:2d:e6"
+DST_MAC="b4:96:91:90:3c:81"    # This is Messi's NIC address
 DST_IP="10.0.0.2"
 DST_PORT=1111
 NTEST=1024
@@ -15,7 +15,7 @@ CPU="3"   # can now be a single CPU, range (e.g., 0-3), or list (e.g., 0,2,4-6)
 
 # Tunables via flags (see usage)
 N=1                  # -n : number of instances
-MODE="poll"          # -m : block|poll
+MODE="block"          # -m : block|poll
 START_PORT=1200      # -p : starting src port
 RING_START=0         # -R : first ring id
 RING_COUNT=""        # -K : wrap rings modulo this count (optional)
