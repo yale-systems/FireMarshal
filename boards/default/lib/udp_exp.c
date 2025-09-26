@@ -41,14 +41,15 @@
 #define MODE_SERVER "server"    // Blocking Server
 
 struct timespec timespec_diff(struct timespec *start, struct timespec *end);
-struct timespec test_udp_latency_block(struct accnet_info *accnet, struct iocache_info *iocache,
+struct timespec timespec_from_tick(uint64_t ns);
+uint64_t test_udp_latency_block(struct accnet_info *accnet, struct iocache_info *iocache,
                                         uint8_t payload[], uint32_t payload_size, bool debug);
-struct timespec test_udp_latency_poll(struct accnet_info *accnet, struct iocache_info *iocache, 
+uint64_t test_udp_latency_poll(struct accnet_info *accnet, struct iocache_info *iocache, 
                                         uint8_t payload[], uint32_t payload_size, bool debug);
 void test_udp_server_block(struct accnet_info *accnet, struct iocache_info *iocache, bool debug);
 
 uint64_t time_ns[8] = {0};
-
+uint64_t network_ticks = 0;
 
 /* 1) Global flag set by Ctrl-C (SIGINT) */
 static volatile sig_atomic_t g_got_sigint = 0;
@@ -264,14 +265,14 @@ int main(int argc, char **argv) {
             payload[i] = i & 0xff;
         }
 
-        long long sum_ns = 0, min_ns = 0, max_ns = 0;
+        long long sum_ticks = 0, min_ticks = 0, max_ticks = 0;
         uint64_t sum_network_latency_tick = 0;
     
         /* Run Test */
         int received_ok = 0;
         int received_total = 0;
         for (int i = 0; i < n_tests && !g_got_sigint; i++) {
-            struct timespec diff = {0, 0};
+            uint64_t diff = 0;
     
             if (strcmp(mode, MODE_POLLING) == 0) {
                 diff = test_udp_latency_poll(accnet, iocache, payload, payload_size, debug); 
@@ -279,7 +280,7 @@ int main(int argc, char **argv) {
             else if (strcmp(mode, MODE_BLOCKING) == 0) {
                 diff = test_udp_latency_block(accnet, iocache, payload, payload_size, debug);
             }
-            if (diff.tv_sec == 0 && diff.tv_nsec == 0) {
+            if (diff == 0) {
                 continue;
             }
     
@@ -289,30 +290,31 @@ int main(int argc, char **argv) {
             if (i == 0 && skip_first)
                 continue;
     
-            long long rtt_ns        = diff.tv_sec * 1e9 + diff.tv_nsec;
             uint64_t netdelay_tick   = accnet_get_outside_ticks(accnet);
     
-            if (i == 0 || min_ns == 0) {
-                min_ns = max_ns = rtt_ns;
+            if (i == 0 || min_ticks == 0) {
+                min_ticks = max_ticks = diff;
             } else {
-                if (rtt_ns < min_ns) min_ns = rtt_ns;
-                if (rtt_ns > max_ns) max_ns = rtt_ns;
+                if (diff < min_ticks) min_ticks = diff;
+                if (diff > max_ticks) max_ticks = diff;
             }
-            sum_ns += rtt_ns;
-            rtts[i] = rtt_ns;
+            sum_ticks += diff;
+            rtts[i] = diff;
     
             sum_network_latency_tick += netdelay_tick;
     
             ++received_ok;
-            // printf("iter=%d rtt=%.3f us\n", i, rtt_ns / 1e3);
+            // printf("iter=%d rtt=%.3f us\n", i, diff / 1e3);
         }
         // iocache_print_proc_util(iocache);
     
-        double avg_us           = (sum_ns                   / (double)received_ok) / 1e3;
+        double avg_us           = (sum_ticks                   / (double)received_ok) * US_PER_TICK;
         double avg_network_us   = (sum_network_latency_tick / (double)received_ok) * US_PER_TICK;
     
         printf("\nResults (%s): recv=%d/%d  min=%.2f us , avg=%.2f us , max=%.2f us , network=%.2f us\n\n",
-                    mode, received_total, n_tests, min_ns/1e3, avg_us, max_ns/1e3, avg_network_us);
+                    mode, received_total, n_tests, 
+                    min_ticks * US_PER_TICK, avg_us, max_ticks * US_PER_TICK, avg_network_us);
+
         // printf("Time breakdown average:\nEntry-Before: %.3f us\nPLIC-Entry: %.3f us\nIRQ-PLIC: %.3f us\n"
         //     "Syscall-IRQ: %.3f us\nAfter-Syscall: %.3f us\n",
         //         time_ns[0]/(double)received_ok/1e3, 
@@ -324,7 +326,7 @@ int main(int argc, char **argv) {
     
         if (print_all) {
             for (int i = 0; i < n_tests; i++) {
-                printf("iter=%d rtt=%.3f us\n", i, rtts[i] / 1e3);
+                printf("iter=%d rtt=%.3f us\n", i, rtts[i] * US_PER_TICK / 1e3);
             }
         }
     }
@@ -412,11 +414,12 @@ void test_udp_server_block(struct accnet_info *accnet, struct iocache_info *ioca
     } while (!g_got_sigint);
 }
 
-struct timespec test_udp_latency_block(struct accnet_info *accnet, struct iocache_info *iocache,
+uint64_t test_udp_latency_block(struct accnet_info *accnet, struct iocache_info *iocache,
 uint8_t payload[], uint32_t payload_size, bool debug) 
 {
     int row = iocache->row;
-    struct timespec before, after;
+    uint64_t before, after;
+    uint64_t a1, a2;
     __u64 last_ktimes[5] = {0};
     int ret;
 
@@ -436,20 +439,24 @@ uint8_t payload[], uint32_t payload_size, bool debug)
     memcpy((char *)iocache->udp_tx_buffer + tx_tail, payload, payload_size);
     uint32_t new_tx_tail = (tx_tail + payload_size) % iocache->udp_tx_size;
 
-    clock_gettime(CLOCK_MONOTONIC, &before);
+
+    // clock_gettime(CLOCK_MONOTONIC, &before);
+    before = reg_read64(accnet->regs, ACCNET_CTRL_TIMESTAMP);
+    mmio_rmb();
     reg_write32(accnet->udp_tx_regs, ACCNET_UDP_TX_RING_TAIL(row), new_tx_tail);
     mmio_wmb();
 
     /* Waiting for RX */
     ret = iocache_wait_on_rx(iocache);
-    clock_gettime(CLOCK_MONOTONIC, &after);
+    after = reg_read64(accnet->regs, ACCNET_CTRL_TIMESTAMP);
+    mmio_rmb();
 
     /* Updating RX HEAD */
     rx_tail = reg_read32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_TAIL(row));
     int size = (rx_tail > rx_head) ? rx_tail - rx_head : rx_size - (rx_head - rx_tail);
     reg_write32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_HEAD(row), rx_tail);
 
-    if (ret == -1) return (struct timespec){0, 0};
+    if (ret == -1) return 0;
 
     // /* IRQ timestamp */
     // if (iocache_get_last_ktimes(iocache, last_ktimes) == 0) {
@@ -478,16 +485,15 @@ uint8_t payload[], uint32_t payload_size, bool debug)
     //     printf("Either 'iocache_get_last_irq_ns' or 'iocache_get_last_ktimes' failed\n");
     // }
 
-    return timespec_diff(&before, &after);
+    return after - before;
 }
 
-struct timespec test_udp_latency_poll(struct accnet_info *accnet, struct iocache_info *iocache, 
+uint64_t test_udp_latency_poll(struct accnet_info *accnet, struct iocache_info *iocache, 
 uint8_t payload[], uint32_t payload_size, bool debug)
 {
-    struct timespec before, after;
+    uint64_t before, after;
     int row = iocache->row;
 
-    // printf("poll, row is %d\n", row);
     int counter = 0;
 
     uint32_t rx_head, rx_tail, rx_size;
@@ -516,7 +522,10 @@ uint8_t payload[], uint32_t payload_size, bool debug)
     uint32_t val = (tx_tail + payload_size) % iocache->udp_tx_size;
     if (debug) printf("Begin Test... (new_tail=%u) \n", val);
     
-    clock_gettime(CLOCK_MONOTONIC, &before);
+
+    before = reg_read64(accnet->regs, ACCNET_CTRL_TIMESTAMP);
+    mmio_rmb();
+
     reg_write32(accnet->udp_tx_regs, ACCNET_UDP_TX_RING_TAIL(row), val);
     do {
         rx_tail = reg_read32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_TAIL(row));
@@ -527,7 +536,9 @@ uint8_t payload[], uint32_t payload_size, bool debug)
         }
     } while (rx_tail != (rx_head + payload_size) % iocache->udp_rx_size && !g_got_sigint);
     
-    clock_gettime(CLOCK_MONOTONIC, &after);
+    after = reg_read64(accnet->regs, ACCNET_CTRL_TIMESTAMP);
+    mmio_rmb();
+
 
     rx_head = reg_read32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_HEAD(row));
     rx_size = reg_read32(iocache->regs, IOCACHE_REG_RX_RING_SIZE(row));
@@ -559,7 +570,7 @@ uint8_t payload[], uint32_t payload_size, bool debug)
     // Updating RX HEAD
     reg_write32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_HEAD(row), rx_tail);
 
-    return timespec_diff(&before, &after);
+    return after - before;
 }
 
 struct timespec timespec_diff(struct timespec *start, struct timespec *end) {
@@ -572,4 +583,11 @@ struct timespec timespec_diff(struct timespec *start, struct timespec *end) {
         temp.tv_nsec += 1000000000L;
     }
     return temp;
+}
+
+struct timespec timespec_from_tick(uint64_t ns) {
+    struct timespec ts;
+    ts.tv_sec  = ns / 1000000000ULL;         // whole seconds
+    ts.tv_nsec = ns % 1000000000ULL;         // leftover nanoseconds
+    return ts;
 }
