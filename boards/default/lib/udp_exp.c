@@ -21,6 +21,8 @@
 #include <time.h>
 #include <sched.h>    // Required for cpu_set_t, CPU_ZERO, CPU_SET, sched_setaffinity
 #include <termios.h>
+#include <signal.h>
+#include <errno.h>
 
 #include "common.h"
 #include "accnet_ioctl.h"
@@ -34,16 +36,39 @@
 #endif
 #include <bits/cpu-set.h>
 
-#define MODE_POLLING "poll"
-#define MODE_BLOCKING "block"
+#define MODE_POLLING "poll"     // Polling Client
+#define MODE_BLOCKING "block"   // Blocking Client
+#define MODE_SERVER "server"    // Blocking Server
 
 struct timespec timespec_diff(struct timespec *start, struct timespec *end);
 struct timespec test_udp_latency_block(struct accnet_info *accnet, struct iocache_info *iocache,
                                         uint8_t payload[], uint32_t payload_size, bool debug);
 struct timespec test_udp_latency_poll(struct accnet_info *accnet, struct iocache_info *iocache, 
                                         uint8_t payload[], uint32_t payload_size, bool debug);
+void test_udp_server_block(struct accnet_info *accnet, struct iocache_info *iocache, bool debug);
 
 uint64_t time_ns[8] = {0};
+
+
+/* 1) Global flag set by Ctrl-C (SIGINT) */
+static volatile sig_atomic_t g_got_sigint = 0;
+
+/* 2) Minimal, async-signal-safe handler */
+static void on_sigint(int signo) {
+    (void)signo;
+    g_got_sigint = 1;           // just set a flag; do nothing else here
+}
+
+/* 3) Install handler (SIGINT + optional SIGTERM) */
+static void install_sig_handlers(void) {
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = on_sigint;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;            // NO SA_RESTART: interrupt blocking syscalls
+    sigaction(SIGINT,  &sa, NULL);
+    sigaction(SIGTERM, &sa, NULL);  // optional: treat kill -TERM like Ctrl-C
+}
 
 static inline uint64_t rdcycle(void)
 {
@@ -92,7 +117,7 @@ int main(int argc, char **argv) {
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--help") == 0) {
             printf("Usage: %s [--cpu A]"
-                "[--ntest N] [--mode {" MODE_POLLING "|" MODE_BLOCKING "}]"
+                "[--ntest N] [--mode {" MODE_POLLING "|" MODE_BLOCKING "|" MODE_SERVER "}]"
                 "[--payload-size BYTES] [--ring R]"
                 "[--src-ip ADDR] [--src-port PORT] "
                 "[--dst-ip ADDR] [--dst-port PORT] "
@@ -114,11 +139,11 @@ int main(int argc, char **argv) {
         }
         else if (strcmp(argv[i], "--mode") == 0 && i + 1 < argc) {
             mode = argv[++i];
-            if (strcmp(mode, MODE_POLLING) == 0 || strcmp(mode, MODE_BLOCKING) == 0) {
+            if (strcmp(mode, MODE_POLLING) == 0 || strcmp(mode, MODE_BLOCKING) == 0 || strcmp(mode, MODE_SERVER) == 0) {
                 // printf("Parsed --mode = %s\n", mode);
             }
             else {
-                fprintf(stderr, "Invalid mode (options: " MODE_POLLING ", " MODE_BLOCKING ")\n");
+                fprintf(stderr, "Invalid mode (options: " MODE_POLLING ", " MODE_BLOCKING ", " MODE_SERVER ")\n");
                 return -1;
             }
         }
@@ -179,9 +204,11 @@ int main(int argc, char **argv) {
     fflush(stdout);
 
     pin_to_cpu(cpu);
+    install_sig_handlers();
 
     bool is_polling     = strcmp(mode, MODE_POLLING) == 0;
     bool is_blocking    = strcmp(mode, MODE_BLOCKING) == 0;
+    bool is_server      = strcmp(mode, MODE_SERVER) == 0;
 
     struct accnet_info *accnet      = malloc(sizeof(struct accnet_info));
     struct iocache_info *iocache    = calloc(1, sizeof(*iocache));
@@ -222,78 +249,86 @@ int main(int argc, char **argv) {
     // if (is_blocking)
     //     iocache_start_scheduler(iocache);
 
-    /* Initializing payload */
-    uint8_t payload[payload_size];
-    for (uint32_t i = 0; i < payload_size; i++) {
-        payload[i] = i & 0xff;
-    }
-
     /* Init rings */
     // accnet_start_ring(accnet);
 
-    long long sum_ns = 0, min_ns = 0, max_ns = 0;
-    uint64_t sum_network_latency_tick = 0;
-
-    /* Run Test */
-    int received_ok = 0;
-    int received_total = 0;
-    for (int i = 0; i < n_tests; i++) {
-        struct timespec diff = {0, 0};
-
-        if (strcmp(mode, MODE_POLLING) == 0) {
-            diff = test_udp_latency_poll(accnet, iocache, payload, payload_size, debug); 
-        }
-        else if (strcmp(mode, MODE_BLOCKING) == 0) {
-            diff = test_udp_latency_block(accnet, iocache, payload, payload_size, debug);
-        }
-        if (diff.tv_sec == 0 && diff.tv_nsec == 0) {
-            continue;
-        }
-
-        ++received_total;
-
-        /* skip first packet entirely */
-        if (i == 0 && skip_first)
-            continue;
-
-        long long rtt_ns        = diff.tv_sec * 1e9 + diff.tv_nsec;
-        uint64_t netdelay_tick   = accnet_get_outside_ticks(accnet);
-
-        if (i == 0 || min_ns == 0) {
-            min_ns = max_ns = rtt_ns;
-        } else {
-            if (rtt_ns < min_ns) min_ns = rtt_ns;
-            if (rtt_ns > max_ns) max_ns = rtt_ns;
-        }
-        sum_ns += rtt_ns;
-        rtts[i] = rtt_ns;
-
-        sum_network_latency_tick += netdelay_tick;
-
-        ++received_ok;
-        // printf("iter=%d rtt=%.3f us\n", i, rtt_ns / 1e3);
+    if (is_server) {
+        test_udp_server_block(accnet, iocache, debug);
     }
-    // iocache_print_proc_util(iocache);
+    else {
+        // This is client mode
 
-    double avg_us           = (sum_ns                   / (double)received_ok) / 1e3;
-    double avg_network_us   = (sum_network_latency_tick / (double)received_ok) * US_PER_TICK;
+        /* Initializing payload */
+        uint8_t payload[payload_size];
+        for (uint32_t i = 0; i < payload_size; i++) {
+            payload[i] = i & 0xff;
+        }
 
-    printf("\nResults (%s): recv=%d/%d  min=%.2f us , avg=%.2f us , max=%.2f us , network=%.2f us\n\n",
-                mode, received_total, n_tests, min_ns/1e3, avg_us, max_ns/1e3, avg_network_us);
-    // printf("Time breakdown average:\nEntry-Before: %.3f us\nPLIC-Entry: %.3f us\nIRQ-PLIC: %.3f us\n"
-    //     "Syscall-IRQ: %.3f us\nAfter-Syscall: %.3f us\n",
-    //         time_ns[0]/(double)received_ok/1e3, 
-    //         time_ns[1]/(double)received_ok/1e3, 
-    //         time_ns[2]/(double)received_ok/1e3, 
-    //         time_ns[3]/(double)received_ok/1e3,
-    //         time_ns[4]/(double)received_ok/1e3
-    //     );
-
-    if (print_all) {
-        for (int i = 0; i < n_tests; i++) {
-            printf("iter=%d rtt=%.3f us\n", i, rtts[i] / 1e3);
+        long long sum_ns = 0, min_ns = 0, max_ns = 0;
+        uint64_t sum_network_latency_tick = 0;
+    
+        /* Run Test */
+        int received_ok = 0;
+        int received_total = 0;
+        for (int i = 0; i < n_tests && !g_got_sigint; i++) {
+            struct timespec diff = {0, 0};
+    
+            if (strcmp(mode, MODE_POLLING) == 0) {
+                diff = test_udp_latency_poll(accnet, iocache, payload, payload_size, debug); 
+            }
+            else if (strcmp(mode, MODE_BLOCKING) == 0) {
+                diff = test_udp_latency_block(accnet, iocache, payload, payload_size, debug);
+            }
+            if (diff.tv_sec == 0 && diff.tv_nsec == 0) {
+                continue;
+            }
+    
+            ++received_total;
+    
+            /* skip first packet entirely */
+            if (i == 0 && skip_first)
+                continue;
+    
+            long long rtt_ns        = diff.tv_sec * 1e9 + diff.tv_nsec;
+            uint64_t netdelay_tick   = accnet_get_outside_ticks(accnet);
+    
+            if (i == 0 || min_ns == 0) {
+                min_ns = max_ns = rtt_ns;
+            } else {
+                if (rtt_ns < min_ns) min_ns = rtt_ns;
+                if (rtt_ns > max_ns) max_ns = rtt_ns;
+            }
+            sum_ns += rtt_ns;
+            rtts[i] = rtt_ns;
+    
+            sum_network_latency_tick += netdelay_tick;
+    
+            ++received_ok;
+            // printf("iter=%d rtt=%.3f us\n", i, rtt_ns / 1e3);
+        }
+        // iocache_print_proc_util(iocache);
+    
+        double avg_us           = (sum_ns                   / (double)received_ok) / 1e3;
+        double avg_network_us   = (sum_network_latency_tick / (double)received_ok) * US_PER_TICK;
+    
+        printf("\nResults (%s): recv=%d/%d  min=%.2f us , avg=%.2f us , max=%.2f us , network=%.2f us\n\n",
+                    mode, received_total, n_tests, min_ns/1e3, avg_us, max_ns/1e3, avg_network_us);
+        // printf("Time breakdown average:\nEntry-Before: %.3f us\nPLIC-Entry: %.3f us\nIRQ-PLIC: %.3f us\n"
+        //     "Syscall-IRQ: %.3f us\nAfter-Syscall: %.3f us\n",
+        //         time_ns[0]/(double)received_ok/1e3, 
+        //         time_ns[1]/(double)received_ok/1e3, 
+        //         time_ns[2]/(double)received_ok/1e3, 
+        //         time_ns[3]/(double)received_ok/1e3,
+        //         time_ns[4]/(double)received_ok/1e3
+        //     );
+    
+        if (print_all) {
+            for (int i = 0; i < n_tests; i++) {
+                printf("iter=%d rtt=%.3f us\n", i, rtts[i] / 1e3);
+            }
         }
     }
+
 
     // if (is_blocking)
     //     iocache_stop_scheduler(iocache);
@@ -306,6 +341,75 @@ int main(int argc, char **argv) {
     iocache_close(iocache);
     exit(0);
     return 0;
+}
+
+void test_udp_server_block(struct accnet_info *accnet, struct iocache_info *iocache, bool debug) {
+    int ret;
+    int row = iocache->row;
+    
+    uint32_t size;
+    uint32_t new_tx_tail;
+    uint32_t tx_head, tx_tail, tx_size;
+    uint32_t rx_head, rx_tail, rx_size;
+    
+    tx_head = reg_read32(accnet->udp_tx_regs, ACCNET_UDP_TX_RING_HEAD(row));
+    tx_tail = reg_read32(accnet->udp_tx_regs, ACCNET_UDP_TX_RING_TAIL(row));
+    tx_size = reg_read32(iocache->regs, IOCACHE_REG_TX_RING_SIZE(row));
+
+    /* Preparing to receive the payload */
+    rx_head = reg_read32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_HEAD(row));
+    rx_tail = reg_read32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_TAIL(row));
+    rx_size = reg_read32(iocache->regs, IOCACHE_REG_RX_RING_SIZE(row));
+
+    if (tx_head != tx_tail) {
+        printf("TX is weird!\n");
+        return;
+    }
+
+    if (rx_head != rx_tail) {
+        printf("RX is weird!\n");
+        return;
+    }
+
+    do {
+        ret = iocache_wait_on_rx(iocache);
+
+        if (ret == 0) {
+            // Means there is a packet
+            rx_tail = reg_read32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_TAIL(row));
+            mmio_rmb();
+
+            if (rx_tail == rx_head) {
+                size = 0;
+                printf("Size is weird!\n");
+                continue;
+            } else if (rx_tail > rx_head) {
+                size = rx_tail - rx_head;
+            } else {
+                size = rx_size - (rx_head - rx_tail);
+            }
+
+            // Copy from RX ring -> TX ring
+            memcpy((char *)iocache->udp_tx_buffer + tx_tail, (char *)iocache->udp_rx_buffer + rx_head, size);
+
+            // We are done consuming RX bytes up to rx_tail: publish new RX_HEAD
+            mmio_wmb();
+            reg_write32(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_HEAD(row), rx_tail);
+
+            // Advance TX tail and notify HW
+            new_tx_tail = (tx_tail + size) % iocache->udp_tx_size;
+
+            mmio_wmb();
+            reg_write32(accnet->udp_tx_regs, ACCNET_UDP_TX_RING_TAIL(row), new_tx_tail);
+
+            // update our software view
+            rx_head = rx_tail;
+            tx_tail = new_tx_tail;
+        }
+        else {
+            // timeout path (no-op)
+        }
+    } while (!g_got_sigint);
 }
 
 struct timespec test_udp_latency_block(struct accnet_info *accnet, struct iocache_info *iocache,
@@ -421,7 +525,7 @@ uint8_t payload[], uint32_t payload_size, bool debug)
         if (debug) {
             printf("Waiting for RX (new rx_tail=%u)...\n", rx_tail);
         }
-    } while (rx_tail != (rx_head + payload_size) % iocache->udp_rx_size);
+    } while (rx_tail != (rx_head + payload_size) % iocache->udp_rx_size && !g_got_sigint);
     
     clock_gettime(CLOCK_MONOTONIC, &after);
 

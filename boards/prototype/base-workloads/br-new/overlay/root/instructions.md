@@ -2,7 +2,7 @@ Use these commands:
 
 Make files executable:
 ```shell
-chmod +x udp_* interrupt_exp run.sh
+chmod +x udp_* run.sh
 ```
 
 (Optional) Pin AccNIC's interrupts to CPU 0. You may use `echo '0-3' >` to assign them to all cores.
@@ -20,11 +20,17 @@ time -f 'avg CPU: %P  (elapsed=%E)'
 Running udp echo experiment with kernel `socket` implementation using AccNIC:
 ```shell
 ./udp_client_kernel --ntest 64 --payload-size 64
+./udp_server_kernel
 ```
 
 To reset all:
 ```shell
 ./udp_exp --reset
+```
+
+UDP echo server (Blocking) with the offload engine in AccNIC:
+```shell
+chrt -f 5 ./udp_exp --src-mac 00:0a:35:06:4d:e2 --src-ip 10.0.0.1 --src-port 1234 --dst-mac b4:96:91:90:3c:81 --dst-ip 10.0.0.2 --dst-port 1111 --mode server --cpu 3 --ring 0
 ```
 
 UDP echo experiment (Blocking) with the offload engine in AccNIC:
