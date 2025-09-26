@@ -17,37 +17,40 @@
 /* ===================================================================== */
 /* =========================  UDP RX ENGINE  =========================== */
 /* ===================================================================== */
-#define ACCNET_UDP_RX_RING_STRIDE          0x10UL
+#define ACCNET_UDP_RX_RING_STRIDE          0x20UL
 
-#define ACCNET_UDP_RX_RING_HEAD_OFF        0x00UL
-#define ACCNET_UDP_RX_RING_TAIL_OFF        0x04UL
-#define ACCNET_UDP_RX_RING_DROP_OFF        0x08UL
+#define ACCNET_UDP_RX_RING_HEAD_OFF             0x00UL
+#define ACCNET_UDP_RX_RING_TAIL_OFF             0x04UL
+#define ACCNET_UDP_RX_RING_DROP_OFF             0x08UL
+#define ACCNET_UDP_RX_RING_LAST_TIMESTAMP_OFF  	0x10UL
 
 #define ACCNET_UDP_RX_RING_REG(r, off)    ((uint64_t)(r) * ACCNET_UDP_RX_RING_STRIDE + (off))
 
 /* Per-ring convenience */
-#define ACCNET_UDP_RX_RING_HEAD(r)        ACCNET_UDP_RX_RING_REG((r), ACCNET_UDP_RX_RING_HEAD_OFF)   /* 32-bit */
-#define ACCNET_UDP_RX_RING_TAIL(r)        ACCNET_UDP_RX_RING_REG((r), ACCNET_UDP_RX_RING_TAIL_OFF)   /* 32-bit */
-#define ACCNET_UDP_RX_RING_DROP(r)        ACCNET_UDP_RX_RING_REG((r), ACCNET_UDP_RX_RING_DROP_OFF)   /* 32-bit, RO */
+#define ACCNET_UDP_RX_RING_HEAD(r)              ACCNET_UDP_RX_RING_REG((r), ACCNET_UDP_RX_RING_HEAD_OFF)   /* 32-bit */
+#define ACCNET_UDP_RX_RING_TAIL(r)              ACCNET_UDP_RX_RING_REG((r), ACCNET_UDP_RX_RING_TAIL_OFF)   /* 32-bit */
+#define ACCNET_UDP_RX_RING_DROP(r)              ACCNET_UDP_RX_RING_REG((r), ACCNET_UDP_RX_RING_DROP_OFF)   /* 32-bit, RO */
+#define ACCNET_UDP_RX_RING_LAST_TIMESTAMP(r)    ACCNET_UDP_RX_RING_REG((r), ACCNET_UDP_RX_RING_LAST_TIMESTAMP_OFF)   /* 64-bit, RO */
 
 /* Engine-level IRQ */
 #define ACCNET_UDP_RX_IRQ_PENDING         0x400UL
 #define ACCNET_UDP_RX_IRQ_CLEAR           0x404UL
-#define ACCNET_UDP_RX_LAST_TIMESTAMP      0x408UL
 
 /* ===================================================================== */
 /* =========================  UDP TX ENGINE  =========================== */
 /* ===================================================================== */
 #define ACCNET_UDP_TX_RING_STRIDE          0x10UL
 
-#define ACCNET_UDP_TX_RING_HEAD_OFF        0x00UL
-#define ACCNET_UDP_TX_RING_TAIL_OFF        0x04UL
+#define ACCNET_UDP_TX_RING_HEAD_OFF             0x00UL
+#define ACCNET_UDP_TX_RING_TAIL_OFF             0x04UL
+#define ACCNET_UDP_TX_RING_LAST_TIMESTAMP_OFF   0x08UL
 
 #define ACCNET_UDP_TX_RING_REG(r, off)    ((uint64_t)(r) * ACCNET_UDP_TX_RING_STRIDE + (off))
 
 /* Per-ring convenience */
-#define ACCNET_UDP_TX_RING_HEAD(r)        ACCNET_UDP_TX_RING_REG((r), ACCNET_UDP_TX_RING_HEAD_OFF)   /* 32-bit */
-#define ACCNET_UDP_TX_RING_TAIL(r)        ACCNET_UDP_TX_RING_REG((r), ACCNET_UDP_TX_RING_TAIL_OFF)   /* 32-bit */
+#define ACCNET_UDP_TX_RING_HEAD(r)              ACCNET_UDP_TX_RING_REG((r), ACCNET_UDP_TX_RING_HEAD_OFF)   /* 32-bit */
+#define ACCNET_UDP_TX_RING_TAIL(r)              ACCNET_UDP_TX_RING_REG((r), ACCNET_UDP_TX_RING_TAIL_OFF)   /* 32-bit */
+#define ACCNET_UDP_TX_RING_LAST_TIMESTAMP(r)    ACCNET_UDP_TX_RING_REG((r), ACCNET_UDP_TX_RING_LAST_TIMESTAMP_OFF)   /* 64-bit, RO */
 
 /* Global/header regs */
 #define ACCNET_UDP_TX_MTU                 0x400UL  /* 16-bit */
@@ -61,12 +64,10 @@
 /* TX IRQ */
 #define ACCNET_UDP_TX_IRQ_PENDING         0x430UL
 #define ACCNET_UDP_TX_IRQ_CLEAR           0x434UL
-#define ACCNET_UDP_TX_LAST_TIMESTAMP      0x438UL
 
 // Control registers
 #define ACCNET_CTRL_INTR_MASK              0x00
-#define ACCNET_CTRL_FILTER_PORT            0x08
-#define ACCNET_CTRL_FILTER_IP              0x10
+#define ACCNET_CTRL_TIMESTAMP              0x10
 
 struct ring_info {
     uint32_t rx_head, rx_tail, rx_size;
@@ -98,6 +99,11 @@ int accnet_setup_connection(struct accnet_info *accnet, struct connection_info *
 uint64_t accnet_get_outside_ticks(struct accnet_info *accnet);
 
 size_t accnet_send(struct accnet_info *accnet, void *buffer, size_t len);
+
+static inline uint64_t accnet_get_time(struct accnet_info *accnet) 
+{
+    reg_read64(accnet->regs, ACCNET_CTRL_TIMESTAMP);
+}
 
 static inline void accnet_set_rx_head(struct accnet_info *accnet, uint32_t val) 
 {
