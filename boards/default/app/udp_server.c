@@ -106,7 +106,8 @@ int main(int argc, char **argv) {
         if (n > 0) {
             buffer[0] = (unsigned char)((buffer[0] + 1) & 0xFF);  // simple mutation
         }
-
+	// usleep(1000);
+	//printf("received\n");
         if (sendto(sockfd, buffer, (size_t)n, 0,
                    (struct sockaddr *)&client_addr, addr_len) < 0) {
             perror("sendto");

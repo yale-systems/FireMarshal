@@ -35,7 +35,7 @@
 #define NUM_CPUS 	4
 
 #define IOCACHE_CACHE_ENTRY_COUNT		64
-#define IOCACHE_UDP_RING_SIZE 			16 * 1024 		// 8KB
+#define IOCACHE_UDP_RING_SIZE 			32 * 1024 		// 8KB
 
 /* ---- Sub-block bases (must match Scala) ---- */
 #define IOCACHE_INT_BASE     0x000UL

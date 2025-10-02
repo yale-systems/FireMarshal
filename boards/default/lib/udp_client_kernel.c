@@ -26,8 +26,6 @@
 #include <netinet/in.h>
 #include <bits/cpu-set.h>
 
-
-
 #define SERVER_IP   "10.0.0.2"
 #define SERVER_PORT 1111
 #define DEFAULT_NTEST 64
@@ -40,7 +38,7 @@
 
 static void usage(const char *prog) {
     fprintf(stderr,
-        "Usage: %s [--ntest N] [--payload-size BYTES]\n"
+        "Usage: %s [--ntest N] [--payload-size BYTES] [--out FILE]\n"
         "Defaults: --ntest %d, --payload-size %d\n",
         prog, DEFAULT_NTEST, DEFAULT_PAYLOAD);
 }
@@ -53,7 +51,6 @@ static long long ts_diff_ns(const struct timespec *a, const struct timespec *b) 
 }
 
 int main(int argc, char **argv) {
-
     int cpu = 0;
     cpu_set_t set; CPU_ZERO(&set); CPU_SET(cpu, &set);
     if (sched_setaffinity(0, sizeof(set), &set) != 0) {
@@ -67,7 +64,7 @@ int main(int argc, char **argv) {
     int ntest = DEFAULT_NTEST;
     int payload = DEFAULT_PAYLOAD;
 
-    // Simple arg parsing: --ntest N and --payload-size BYTES
+    // Arg parsing: --ntest, --payload-size, --out
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--ntest") == 0 && i+1 < argc) {
             ntest = atoi(argv[++i]);
@@ -96,8 +93,22 @@ int main(int argc, char **argv) {
         return 1;
     }
 
+    char out_path[64];
+    snprintf(out_path, sizeof(out_path), "out-%d.txt", payload);
+
+    // Open output file if requested
+    FILE *fout = NULL;
+    if (out_path) {
+        fout = fopen(out_path, "w");
+        if (!fout) {
+            perror("fopen --out");
+            return 1;
+        }
+        fprintf(fout, "pkt_index \t size(B) \t RTT(us) \t network_time(us)\n");
+    }
+
     int sock = socket(AF_INET, SOCK_DGRAM, 0);
-    if (sock < 0) { perror("socket"); return 1; }
+    if (sock < 0) { perror("socket"); if (fout) fclose(fout); return 1; }
 
     struct sockaddr_in dst;
     memset(&dst, 0, sizeof(dst));
@@ -105,20 +116,19 @@ int main(int argc, char **argv) {
     dst.sin_port = htons(SERVER_PORT);
     if (inet_aton(SERVER_IP, &dst.sin_addr) == 0) {
         fprintf(stderr, "Invalid server IP\n");
+        if (fout) fclose(fout);
         return 1;
     }
 
     uint8_t *buf = malloc(payload);
-    if (!buf) { perror("malloc"); return 1; }
-
-    printf("UDP client -> %s:%d | ntest=%d payload=%d\n",
-           SERVER_IP, SERVER_PORT, ntest, payload);
+    if (!buf) { perror("malloc"); if (fout) fclose(fout); return 1; }
 
     long long sum_ns = 0, min_ns = 0, max_ns = 0;
     int received_ok = 0;
+    const double network_time_us = 28.0; // static network time per your requirement
 
     for (int i = 0; i < ntest; i++) {
-        // Prepare payload: first byte changes each test, rest zeros
+        // Prepare payload
         memset(buf, 0, payload);
         buf[0] = (uint8_t)(i & 0xFF);
 
@@ -133,7 +143,6 @@ int main(int argc, char **argv) {
             continue;
         }
 
-        // Receive reply
         struct sockaddr_in src;
         socklen_t slen = sizeof(src);
         ssize_t n = recvfrom(sock, buf, payload, 0,
@@ -172,7 +181,12 @@ int main(int argc, char **argv) {
         sum_ns += rtt_ns;
         received_ok++;
 
-        // printf("iter=%d rtt=%.3f ms\n", i, rtt_ns / 1e6);
+        // Write one line per successful reply, space-separated:
+        // pkt_index  size(B)  RTT(us)  network_time(us)
+        if (fout) {
+            double rtt_us = rtt_ns / 1000.0;
+            fprintf(fout, "%d %d %.3f %.3f\n", i, payload, rtt_us, network_time_us);
+        }
     }
 
     if (received_ok > 0) {
@@ -183,6 +197,10 @@ int main(int argc, char **argv) {
         printf("\nNo replies received.\n");
     }
 
+    if (fout) {
+        fflush(fout);
+        fclose(fout);
+    }
     free(buf);
     close(sock);
     return 0;

@@ -1,5 +1,5 @@
 #!/bin/sh
-# run_udp_exp.sh — launch many udp_exp instances with varying src ports & rings
+# run_udp_exp.sh — launch many udp_exp instances with varying ports & rings
 
 # Defaults (edit here if you like)
 CMD="chrt -f 10 ./udp_exp"
@@ -8,7 +8,6 @@ SRC_MAC="00:0a:35:06:4d:e2"
 SRC_IP="10.0.0.1"
 DST_MAC="b4:96:91:90:3c:81"    # This is Messi's NIC address
 DST_IP="10.0.0.2"
-DST_PORT=1111
 NTEST=1024
 PAYLOAD=64
 CPU="3"   # can now be a single CPU, range (e.g., 0-3), or list (e.g., 0,2,4-6)
@@ -193,7 +192,7 @@ outputs="$(
         --src-port "$port" \
         --dst-mac "$DST_MAC" \
         --dst-ip "$DST_IP" \
-        --dst-port "$DST_PORT" \
+        --dst-port "$port" \
         --ntest "$NTEST" \
         --mode "$MODE" \
         --payload-size "$PAYLOAD" \

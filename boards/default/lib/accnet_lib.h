@@ -11,8 +11,8 @@
 #include "common.h"
 
 /* =========================  UDP  =========================== */
-#define ACCNET_UDP_RING_SIZE 	32 * 1024 		// 64KB
-#define ACCNET_UDP_RING_COUNT	64
+#define ACCNET_UDP_RING_SIZE 	256 * 1024 		// 64KB
+#define ACCNET_UDP_RING_COUNT	1
 
 /* ===================================================================== */
 /* =========================  UDP RX ENGINE  =========================== */

@@ -116,8 +116,8 @@ int accnet_start_ring(struct accnet_info *accnet) {
 
 uint64_t accnet_get_outside_ticks(struct accnet_info *accnet) {
     int row = accnet->iocache->row;
-    uint64_t rx_timestamp = reg_read64(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_LAST_TIMESTAMP(row));
-    uint64_t tx_timestamp = reg_read64(accnet->udp_tx_regs, ACCNET_UDP_TX_RING_LAST_TIMESTAMP(row));
+    volatile rx_timestamp = reg_read64(accnet->udp_rx_regs, ACCNET_UDP_RX_RING_LAST_TIMESTAMP(row));
+    volatile tx_timestamp = reg_read64(accnet->udp_tx_regs, ACCNET_UDP_TX_RING_LAST_TIMESTAMP(row));
 
     if (rx_timestamp <= tx_timestamp) {
         // printf("Warning: bad timestamps -- tx=%lu , rx=%lu\n", tx_timestamp, rx_timestamp);
